@@ -139,3 +139,4 @@ cython_debug/
 
 ################### CUSTOMIZATIONS ####################
 README.ipynb
+.python-version

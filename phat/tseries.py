@@ -1,10 +1,11 @@
 import functools
-from typing import Iterable
+from typing import Iterable, Union
 import numpy as np
+import matplotlib.pyplot as plt
 
 import numba as nb
 
-from phat.utils import argsetter
+from phat.utils import argsetter, arrayarize, PriceSim
 
 @nb.njit(parallel=True)
 def random_normal(iters=1, periods=252):
@@ -244,16 +245,19 @@ class Garchcaster:
         dist=None,
         use_backcast:bool=True
     ):
-
+        y = arrayarize(y).copy()
+        vols = arrayarize(vols).copy()
+        resids = arrayarize(resids).copy()
+        
         self.periods = periods
         self.iters = iters
 
-        self.arma_params = arma
+        self.arma_params = arrayarize(arma) if arma is not None else arma
         arma_orders = list(order)[:2] if order else None
-        self.arma = ARMA(arma, order=arma_orders)
-        self.garch_params = garch
+        self.arma = ARMA(self.arma_params, order=arma_orders)
+        self.garch_params = arrayarize(garch)
         garch_orders = list(order)[2:] if order else None
-        self.garch = GARCH(garch, order=garch_orders)
+        self.garch = GARCH(self.garch_params, order=garch_orders)
                         
         self.order = (*self.arma.order, *self.garch.order)
         self.maxlag = max(self.order)
@@ -346,9 +350,10 @@ class Garchcaster:
 
     @argsetter(['dist', 'iters', 'periods'], flat=True)
     def forecast(self, iters:int=None, periods:int=None, dist=None, innovs:Iterable=None):
+
         if innovs is None:
             innovs = self._sample_innovs(iters, periods, dist=dist)
-        
+    
         results = Garchcaster._forecast_loop(
             self.y_hist, self.vols_hist, self.resids_hist, innovs,
             iters, periods,
@@ -357,7 +362,88 @@ class Garchcaster:
         return GarchcastResults(*results)
 
 class GarchcastResults:
-    def __init__(self, rets, vols, resids):
-        self.rets = rets
+    def __init__(self, values, vols, resids):
+        self.values = values
         self.vols = vols
         self.resids = resids
+
+        self.iters, self.periods = values.shape
+
+    @property
+    def sim(self):
+        if hasattr(self, '_sim'):
+            return self._sim
+        else:
+            raise ValueError('You must plot a price simulation or call `_make_sim` directly')
+
+    @argsetter(['iters', 'periods'])
+    def _make_sim(self, iters:int, periods:int, p:float=1):
+        self._sim = PriceSim(p0=p, periods=periods, n=iters)
+        return self._sim
+
+    def plot(self, kind='vol', ax:Union[plt.Axes, Iterable[plt.Axes]]=None, *args, **kwargs):
+        multi_ax = ['price']
+        if ax is None and kind not in multi_ax:
+            fig, ax = plt.subplots(1,1,figsize=(10,6))
+
+        if kind == 'vol':
+            ax = self._plot_vol(ax, *args, **kwargs)
+        elif kind == 'var':
+            ax = self._plot_var(ax, *args, **kwargs)
+        elif kind == 'price':
+            if len(args) > 1:
+                p = args[0]
+            if len(args) > 2:
+                n = args[2]
+            if 'p' in kwargs:
+                p = kwargs['p']
+                kwargs.pop('p')
+            if 'n' in kwargs:
+                n = kwargs['n']
+                kwargs.pop('n')
+            
+            ax = self._plot_price(p=p, n=n, axes=ax, *args, **kwargs)
+        elif kind == 'end_price':
+            if len(args) > 1:
+                p = args[0]
+            if 'p' in kwargs:
+                p = kwargs['p']
+                kwargs.pop('p')
+            ax, P = self._plot_end_price(p=p, ax=ax, *args, **kwargs)
+            return ax, P
+        else:
+            raise ValueError(f'`kind:` {kind} not supported')
+
+        return ax
+
+    def _plot_vol(self, ax:plt.Axes, *args, **kwargs):
+        ax.plot((self.vols).mean(axis=0))
+        ax.set_xlabel('Days')
+        plt.suptitle('Phat-GARCH Forecast: Conditional Volatility')
+
+        return ax
+        
+    def _plot_var(self, ax, *args, **kwargs):
+        ax.plot((self.vols**2).mean(axis=0), *args, **kwargs)
+        ax.set_xlabel('Days')
+        plt.suptitle('Phat-GARCH Forecast: Conditional Variance')
+        
+        return ax
+
+    def _plot_price(self, p, n, axes:Iterable[plt.Axes], *args, **kwargs):
+        sim = self._make_sim(p=p)
+        
+        all_axes = []
+        for i in np.random.randint(0,self.iters, size=n):
+            _, __, chart_axes = sim.sim(rets=(1 + self.values[i]/100), axes=axes, show_chart=True, *args, **kwargs)
+            all_axes.append(chart_axes)
+        
+        if axes is None:
+            return np.array(all_axes)
+        else:
+            return axes
+
+    def _plot_end_price(self, p, ax:plt.Axes, *args, **kwargs):
+        sim = self._make_sim(p=p)
+        _, P, (ax, ____) = sim.sims(rets=1 + self.values/100, ax=ax, show_chart=True, *args, **kwargs)
+        return ax, P

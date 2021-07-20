@@ -1,12 +1,11 @@
 import numpy as np
 import pandas as pd
-import functools
 import itertools as it
 
 import tensorflow as tf
 
-from analysis.options.pricing.learn.dists import Phat4TF
-from analysis.options.pricing.learn.utils import GraphicMixin
+from phat.learn.dists import Phat4TF
+from phat.learn.utils import GraphicMixin, splitter
 
 logger = tf.get_logger()
 
@@ -285,7 +284,7 @@ class WeightsCallBack(tf.keras.callbacks.Callback):
         self.weights[epoch] = {}
 
 class PhatNet(tf.keras.Model, GraphicMixin):
-    PARAM_NAMES = ['mean', 'std', 'shape_l', 'shape_r']
+    PARAM_NAMES = ['mean', 'sig', 'shape_l', 'shape_r']
     def __init__(self, neurons=4):
         super(PhatNet, self).__init__(name='PhatNet')
 
@@ -336,23 +335,13 @@ class PhatNet(tf.keras.Model, GraphicMixin):
 
         return {m.name: m.result() for m in self.metrics}
     
-    def predicted_params(self, return_type:str='df'):
+    def predicted_params(self):
         predicted = self.predict([0])
         vals = np.concatenate(list(predicted)).flatten()
         dict = {name: val for name, val in zip(self.PARAM_NAMES, vals)}
         df = pd.DataFrame([dict], index=['']).T
 
-        allowed_return_types = ['values', 'dict', 'df']
-        if return_type not in allowed_return_types:
-            msg = f"`return_type` must be one of {', '.join(allowed_return_types)}"
-            raise ValueError(msg)
-
-        if return_type == 'values':
-            return vals
-        elif return_type == 'dict':
-            return dict
-        elif return_type == 'df':
-            return df
+        return df
 
     @splitter
     def test_step(self, x, y, sample_weight):

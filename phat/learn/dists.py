@@ -1,12 +1,5 @@
 import numpy as np
-from functools import wraps
-from collections import namedtuple
 
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from matplotlib.animation import FuncAnimation
-
-from sklearn.model_selection import train_test_split
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers

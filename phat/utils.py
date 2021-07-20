@@ -1,8 +1,27 @@
 import numpy as np
+import pandas as pd
 from functools import wraps
 from typing import Union, Iterable
 
 import matplotlib.pyplot as plt
+
+def cosh_squared(x,k):
+    return .5*(np.cosh(2*k*x) + 1)
+
+def sech_squared(x,k):
+    return 1 / cosh_squared(x, k)
+
+def arrayarize(val:Iterable):
+    list_types = (list, tuple, set, pd.Series)
+    if isinstance(val, np.ndarray):
+        pass
+    elif isinstance(val, list_types):
+        val = np.array(val)
+    else:
+        text = 'You must provide an iterable of type: '
+        text += ', '.join(list_types)
+        raise ValueError(text)
+    return val
 
 def make_arr(v):
     if isinstance(v, (float, int)):
@@ -32,22 +51,23 @@ def argsetter(kws:Union[Iterable, str]='x', flat=True):
     return deco
 
 class PriceSim:
-    def __init__(self, p0:float, rets=None, days:int=0, n:int=0):
+    def __init__(self, p0:float, rets=None, periods:int=0, n:int=0):
         self.p0 = p0
         self.rets = rets
         self.n = n
-        self.days = days
+        self.periods = periods
     
-    @argsetter(['p0', 'rets', 'days'])
-    def sim(self, p0=None, rets=None, days=None, show_chart:bool=False, *args, **kwargs):
+    @argsetter(['p0', 'rets', 'periods'])
+    def sim(self, p0=None, rets=None, periods=None, show_chart:bool=False, *args, **kwargs):
         S = p0*rets.cumprod()
+        
         if show_chart:
-            return rets, S, self.sim_chart(rets, S, days)
+            return rets, S, self.sim_chart(rets, S, periods, *args, **kwargs)
         else:
             return rets, S
 
-    @argsetter(['p0', 'rets', 'days', 'n'])
-    def sims(self, p0:float=None, rets=None, days:int=None, n:int=None, show_chart:bool=False, *args, **kwargs):        
+    @argsetter(['p0', 'rets', 'periods', 'n'])
+    def sims(self, p0:float=None, rets=None, periods:int=None, n:int=None, show_chart:bool=False, *args, **kwargs):        
         S = p0*rets.cumprod(axis=1)
         
         if show_chart:
@@ -55,23 +75,23 @@ class PriceSim:
         else:
             return rets, S
         
-    def sim_chart(self, rets, S, days, axes:Iterable=None, title=''):
+    def sim_chart(self, rets, S, periods, axes:Iterable=None, title=''):
         if axes is None:
             fig, axes = plt.subplots(1,2,figsize=(14,5))
         elif len(axes) != 2:
             raise ValueError('Chart requires two subplots')
-
+        
         ax1, ax2 = axes
         
-        x = np.arange(days)
+        x = np.arange(periods)
         ax1.plot(x, rets - 1)
         ax2.plot(x, S)
 
         ax1.set_title('Daily Returns')
-        ax2.set_title('Share Price')
+        ax2.set_title('Asset Price')
 
         if not title:
-            title = 'Phat Share Price Simulation'
+            title = 'Phat Price Simulation'
             
         plt.suptitle(title, y=1.05)
         

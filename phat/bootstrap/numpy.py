@@ -1,5 +1,8 @@
+from typing import Iterable
 import warnings
 import numpy as np
+
+from tqdm.auto import trange
 
 def A_dani(n1, k1):
     return (np.log(k1)/(2*np.log(n1) - np.log(k1)))**(2*(np.log(n1) - np.log(k1))/(np.log(n1)))
@@ -172,3 +175,22 @@ def dbl_bs(y, t=.5, r=500, style='hill', A_type='qi'):
         k_star = 2 if k_star == 0 else k_star
 
     return xi[k_star]
+
+def two_tailed_hill_double_bootstrap(values:Iterable[float], iters:int=10, return_mean:bool=True):
+    left = values[values < values.mean()]
+    left = np.sort(-left)[::-1]
+
+    right = values[values > values.mean()]
+    right = np.sort(right)[::-1]
+
+    np.seterr(all='ignore')
+    shl = np.zeros(iters)
+    shr = np.zeros(iters)
+    for i in trange(iters):
+        shl[i] = dbl_bs(left, t=.5, r=500, style='hill', A_type='dani')
+        shr[i] = dbl_bs(right, t=.5, r=500, style='hill', A_type='dani')
+    
+    if return_mean:
+        return shl.mean(), shr.mean()
+    else:
+        return shl, shr

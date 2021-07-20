@@ -10,6 +10,8 @@ from matplotlib.animation import FuncAnimation
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
 
+from phat.utils import arrayarize
+
 def nnelu(input):
     """ Computes the Non-Negative Exponential Linear Unit
     """
@@ -117,13 +119,15 @@ class DataSplit:
     XY = namedtuple('XY', ['x', 'y'])
 
     def __init__(self, 
-        x, y, 
+        y, x:Iterable[float]=None, 
         test_size:float=.1, val_size:float=.1,
         batch_sizes:Union[int, Iterable]=32,
         preprocess:str=''
         ):
         train_batch, test_batch, val_batch = self._set_batch_sizes(batch_sizes)
 
+        y = arrayarize(y)
+        x = arrayarize(x) if x else np.zeros(y.size)
         self.raw = self.XY(x.copy(), y.copy())
         self.test_size = test_size
         self.val_size = val_size

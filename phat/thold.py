@@ -10,7 +10,7 @@ import seaborn as sns
 from rpy2.robjects.packages import importr
 from rpy2.robjects.vectors import FloatVector
 
-from analysis.options.pricing.phat import argsetter
+from phat.utils import argsetter
 
 base = importr('base')
 utils = importr('utils')

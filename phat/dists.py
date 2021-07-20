@@ -5,8 +5,7 @@ from scipy._lib._util import check_random_state
 
 from functools import wraps
 
-from analysis.fincalcs import sech_squared
-from analysis.options.pricing.utils import argsetter
+from phat.utils import argsetter, sech_squared
 
 def karamata_from_call(call, alf):
     t1 = (alf-1)**(1/alf)
@@ -119,26 +118,25 @@ class CarbenBase:
     https://www.researchgate.net/publication/226293435_A_hybrid_Pareto_model_for_asymmetric_fat-tailed_data_The_univariate_case#pf6
     """
 
-    def __init__(self, x, shape, mean, std:float=None, loc:float=None):
-        self.x = x
+    def __init__(self, shape, mean, sig:float=None, loc:float=None):
         self.shape = shape
         self.mean = mean
 
-        provided = (std is None, loc is None)
+        provided = (sig is None, loc is None)
         if all(provided) or not any(provided):
-            raise ValueError('Please provide only one off `std` or `loc`')
-        elif std is not None:
-            self.std = std
-            self._given = 'std'
+            raise ValueError('Please provide only one of `sig` or `loc`')
+        elif sig is not None:
+            self.sig = sig
+            self._given = 'sig'
             self.scale = self._calc_scale()
             self.loc = self._calc_loc()
         elif loc is not None:
             self.loc = loc
             self._given = 'loc'
             self.scale = self._calc_scale()
-            self.std = self._calc_std()
+            self.sig = self._calc_sig()
                 
-        self.body = scist.norm(self.mean, self.std)
+        self.body = scist.norm(self.mean, self.sig)
         
     @property
     def tail(self):
@@ -161,7 +159,7 @@ class CarbenBase:
         """
         in Carreau (2008), W(z) can be calculated directly as:
             
-            std**2 * (1 + shape)**2 / scale**2
+            sig**2 * (1 + shape)**2 / scale**2
 
         scale is not a free parameter, however, so we must calculate W(z) via
         the Lambert function on z, which is defined only in free parameters.
@@ -177,8 +175,8 @@ class CarbenBase:
         val = np.sqrt(self.W_z() / 2)
         return 1 + .5*(1 + spec.erf(val))
 
-    def _calc_scale_w_std(self):
-        num = self.std*(1 + self.shape)
+    def _calc_scale_w_sig(self):
+        num = self.sig*(1 + self.shape)
         denom = np.sqrt(self.W_z())
         
         return num / denom
@@ -189,7 +187,7 @@ class CarbenBase:
         return num / denom
 
     def _calc_scale(self):
-        return self._calc_scale_w_loc() if self._given == 'loc' else self._calc_scale_w_std()
+        return self._calc_scale_w_loc() if self._given == 'loc' else self._calc_scale_w_sig()
 
     @argsetter('x')
     def sf(self, x=None):
@@ -212,9 +210,9 @@ class CarbenRight(CarbenBase):
         self._tail = scist.genpareto(self.shape, loc=self.loc, scale=self.scale)
     
     def _calc_loc(self):
-        return self.mean + self.std*np.sqrt(self.W_z())
+        return self.mean + self.sig*np.sqrt(self.W_z())
 
-    def _calc_std(self):
+    def _calc_sig(self):
         return (self.loc - self.mean) / np.sqrt(self.W_z())
 
     @argsetter('x')
@@ -317,9 +315,9 @@ class CarbenLeft(CarbenBase):
         self._tail = scist.genpareto(self.shape, loc=-self.loc, scale=self.scale)
 
     def _calc_loc(self):
-        return self.mean - self.std*np.sqrt(self.W_z())
+        return self.mean - self.sig*np.sqrt(self.W_z())
 
-    def _calc_std(self):
+    def _calc_sig(self):
         return (self.mean - self.loc) / np.sqrt(self.W_z())
 
     @argsetter('x')
@@ -471,7 +469,7 @@ class Phat:
     has 8 parameters:
         > Left tail: shape, loc, scale
         > Right tail: shape, loc, scale
-        > Center: mean, std
+        > Center: mean, sig
 
     As with any mixture model, this mix is the weighted average result of values from the two
     components. Default weights are 0.5 / 0.5.
@@ -481,26 +479,25 @@ class Phat:
 
     https://www.cs.toronto.edu/~rgrosse/csc321/mixture_models.pdf
     """
-    PARAM_NAMES = ['mean', 'std', 'shape_l',  'shape_r', 'loc_l', 'loc_r', 'scale_l', 'scale_r']
-    def __init__(self, x, mean, std, shape_l, shape_r, p=None):
+    PARAM_NAMES = ['mean', 'sig', 'shape_l',  'shape_r', 'loc_l', 'loc_r', 'scale_l', 'scale_r']
+    def __init__(self, mean:float, sig:float, shape_l:float, shape_r:float, p=None):
         """
         Reverse the mean in the Left tail so that both tails
         are centered around the same mean
         """
-        self.x = x
         self.mean = mean
-        self.std = std
+        self.sig = sig
         self.shape_l = shape_l if isinstance(shape_l, float) and shape_l >= 0 else -shape_l
         self.shape_r = shape_r
 
-        self.left = CarbenHybrid(x, shape_l, mean, std, rtail=False)
-        self.right = CarbenHybrid(x, shape_r, mean, std)
+        self.left = CarbenHybrid(shape_l, mean, sig, rtail=False)
+        self.right = CarbenHybrid(shape_r, mean, sig)
 
         self.p = p if p is not None else np.array([.5,.5])
     
     @property
     def args(self):
-        return self.mean, self.std, self.shape_l, self.shape_r, self.left.loc, \
+        return self.mean, self.sig, self.shape_l, self.shape_r, self.left.loc, \
             self.right.loc, self.left.scale, self.right.scale
 
     @property
@@ -549,9 +546,9 @@ class Phat:
     def var(self):
         return np.array([self.left.var(), self.right.var()])
 
-    def vol(self):
+    def std(self):
         return np.sqrt(self.var())
 
     def std_rvs(self, *args, **kwargs):
-        return self.rvs(*args, **kwargs) / self.vol()
+        return self.rvs(*args, **kwargs) / self.std()
 
