@@ -73,11 +73,12 @@ x = np.linspace(-5+mean, 5+mean, 1000)
 phat_dist = Phat(mean, sig, shape, shape)
 ```
 
-![png](https://github.com/rskene/phat/blob/bf2db52bc0611cde7ff0b3e9f01111f322c09b78/imgs/output_6_0.png)
+![png](https://raw.githubusercontent.com/rskene/phat/master/imgs/output_6_0.png)
+
 
 The Paretian tails are parameterized independently and so allow for asymmetry. Below we show two Phat distributions, one with symmetric tail index of $\alpha=2$ and the other with asymmetric tail indices, $\alpha_{\text{left}}=2$ and $\alpha_{\text{right}}=20$.
 
-![png](https://github.com/rskene/phat/blob/bf2db52bc0611cde7ff0b3e9f01111f322c09b78/imgs/output_8_0.png)
+![png](https://raw.githubusercontent.com/rskene/phat/master/imgs/output_8_0.png)
 
 The left tails are identical and, as would be expected, the distribution with the greater tail index has a slightly lower probability in the body and a slightly higher probability out in the tails ... that slightly higher probability leading to dramatically different effects, as we know.
 
@@ -114,11 +115,11 @@ history = pnet.fit(data.train, validation_data=data.test, epochs=100, verbose=0)
 
 Below we compare the fit of the Phat distribution to that of the Guassian and the Student's T (the paramters found in the `PhatNet` fit can be found via `predicted_params`).  Note the Student's T fits to $v=4.65$, which is equivalent to $\xi = 0.22$, which is a thinner tail than found through the Hill Double bootstrap, particularly for the left tail.
 
-![png](https://github.com/rskene/phat/blob/bf2db52bc0611cde7ff0b3e9f01111f322c09b78/imgs/output_18_0.png)
+![png](https://raw.githubusercontent.com/rskene/phat/master/imgs/output_18_0.png)
 
 Note that the Phat distribution is a better fit to the peak of the distribution while both the normal distribution and Student's T are better fits in the shoulders. The devil, of course, is in the de*tails*.
 
-![png](https://github.com/rskene/phat/blob/bf2db52bc0611cde7ff0b3e9f01111f322c09b78/imgs/output_20_0.png)
+![png](https://raw.githubusercontent.com/rskene/phat/master/imgs/output_20_0.png)
 
 Out in the left and right tails we see the Phat distribution does a far-better job capturing hte extreme events that have occured in the past 10 years. See the documentation for why this seemingly minor improvement has such a big impact in the tails. 
 
@@ -149,19 +150,19 @@ We can visual inspect the forecast via several available plot types.
 fore.plot('var')
 ```
 
-![png](https://github.com/rskene/phat/blob/bf2db52bc0611cde7ff0b3e9f01111f322c09b78/imgs/output_23_0.png)
+![png](https://raw.githubusercontent.com/rskene/phat/master/imgs/output_23_0.png)
 
 ```python
 fore.plot('price', p=ko.Close[-1], n=4)
 ```
 
-![png](https://github.com/rskene/phat/blob/bf2db52bc0611cde7ff0b3e9f01111f322c09b78/imgs/output_24_0.png)
+![png](https://raw.githubusercontent.com/rskene/phat/master/imgs/output_24_0.png)
 
-![png](https://github.com/rskene/phat/blob/bf2db52bc0611cde7ff0b3e9f01111f322c09b78/imgs/output_24_1.png)
+![png](https://raw.githubusercontent.com/rskene/phat/master/imgs/output_24_1.png)
 
-![png](https://github.com/rskene/phat/blob/bf2db52bc0611cde7ff0b3e9f01111f322c09b78/imgs/output_24_2.png)
+![png](https://raw.githubusercontent.com/rskene/phat/master/imgs/output_24_2.png)
 
-![png](https://github.com/rskene/phat/blob/bf2db52bc0611cde7ff0b3e9f01111f322c09b78/imgs/output_24_3.png)
+![png](https://raw.githubusercontent.com/rskene/phat/master/imgs/output_24_3.png)
 
 Customizations can be added as well. Below we see a histogram of the last period prices for each of the 10,000 simulations.
 
@@ -171,4 +172,4 @@ lnorm_fit = scist.lognorm.fit(P[:, -1])
 ax.plot(np.linspace(0, 350), scist.lognorm(*lnorm_fit).pdf(np.linspace(0, 350)))
 ```
 
-![png](https://github.com/rskene/phat/blob/bf2db52bc0611cde7ff0b3e9f01111f322c09b78/imgs/output__0.png)
+![png](https://raw.githubusercontent.com/rskene/phat/master/imgs/output_25_0.png)
