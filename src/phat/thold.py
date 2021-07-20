@@ -5,8 +5,6 @@ import numpy as np
 import scipy.stats as scist
 import matplotlib.pyplot as plt
 
-import seaborn as sns
-
 from rpy2.robjects.packages import importr
 from rpy2.robjects.vectors import FloatVector
 

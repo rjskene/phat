@@ -1,0 +1,6 @@
+/* Custom CSS for Phat Tails documentation */
+
+/* hides cell numbering of input and output code cells */
+div.prompt > .highlight > pre {
+  display: none !important;
+}
