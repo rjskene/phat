@@ -22,7 +22,7 @@ copyright = u'2021 Ryan Skene. All rights reserved.'
 author = 'rskene'
 
 # The full version, including alpha/beta/rc tags
-release = '0.1'
+release = '0.0.6'
 
 # -- General configuration ---------------------------------------------------
 
@@ -54,6 +54,16 @@ html_theme_options = {
     'use_issues_button': True,
     'use_edit_page_button': True,
     'path_to_docs': 'doc',
+}
+mathjax3_config = {
+    'tex': {'displayMath': [],
+        },
+    'chtml': {
+        'scale': 2,
+        # 'mathmlSpacing': false,
+        'displayAlign': 'center',
+        'displayIndent': '0'
+  }
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,

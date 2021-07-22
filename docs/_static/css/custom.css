@@ -1,5 +1,18 @@
 /* Custom CSS for Phat Tails documentation */
 
+/* Increase margin at top of markdown cells */
+p {
+  margin-top: .1em;
+}
+
+/* Increase img size */
+img {
+  display: block !important;
+  margin: 0 auto !important;
+  /* width: 65em !important; */
+  max-width: 175% !important;
+}
+
 /* hides cell numbering of input and output code cells */
 div.prompt > .highlight > pre {
   display: none !important;

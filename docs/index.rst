@@ -11,8 +11,38 @@ Pareto Hybrdis with Asymmetric Tails
    
    notebooks/intro
 
+.. toctree::
+   :caption: Define
+   :maxdepth: 3
 
-.. Indices and tables
+   notebooks/fattails
+   notebooks/thephat
+   notebooks/moments
+
+.. toctree::
+   :caption: Fit
+   :maxdepth: 3
+
+   notebooks/pot
+   notebooks/dblbs
+   notebooks/mle_fit
+   notebooks/nn_fit
+
+.. toctree::
+   :caption: Forecast
+   :maxdepth: 3
+
+   notebooks/garch
+   notebooks/phatgarch
+
+.. toctree::
+   :caption: Misc
+   :maxdepth: 3
+
+   notebooks/references      
+
+   .. Indices and tables
+   
 .. ==================
 
 .. * :ref:`genindex`
