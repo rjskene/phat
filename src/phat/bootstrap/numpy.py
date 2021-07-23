@@ -2,14 +2,18 @@ from typing import Iterable
 import warnings
 import numpy as np
 
+import numba as nb
 from tqdm.auto import trange
 
+@nb.njit
 def A_dani(n1, k1):
     return (np.log(k1)/(2*np.log(n1) - np.log(k1)))**(2*(np.log(n1) - np.log(k1))/(np.log(n1)))
 
+@nb.njit
 def A_qi(n1, k1):
     return (1 - (2*(np.log(k1) - np.log(n1))/(np.log(k1))))**(np.log(k1)/np.log(n1) - 1)
 
+@nb.njit
 def moments_dbs_prefactor(xi_n, n1, k1):
     """ 
     Function to calculate pre-factor used in moments
@@ -79,18 +83,22 @@ def moments_dbs_prefactor(xi_n, n1, k1):
     prefactor = (a/b)**(1./(1. - 2*rho))
     return prefactor
 
+@nb.njit
 def hill_est_for_alpha(k, y):
     return k / (np.cumsum(np.log(y[:-1])) - k*np.log(y[:-1]))
 
+@nb.njit
 def hill_est_for_xi(k,y):
     return np.cumsum(np.log(y[:-1]))/k - np.log(y[1:])
 
+@nb.njit
 def second_moment(k, y):
     t1 = np.cumsum(np.log(y[:-1])**2) / k 
     t2 = 2*np.cumsum(np.log(y[:-1]))*np.log(y[1:]) / k
     t3 = np.log(y[1:])**2
     return t1 - t2 + t3
 
+@nb.njit
 def third_moment(k,y):
     """
     """
@@ -101,14 +109,17 @@ def third_moment(k,y):
     M3 = t1 - t2 + t3 - t4
     return M3
 
+@nb.njit
 def amse(M1, M2):
     return (M2 - 2*M1**2)**2
 
+@nb.njit
 def hill_amse(k,y):
     M1 = hill_est_for_xi(k,y)
     M2 = second_moment(k,y)
     return amse(M1,M2)    
 
+@nb.njit
 def moments_amse(k, y):
     M1 = hill_est_for_xi(k, y)
     M2 = second_moment(k,y)    
@@ -117,24 +128,30 @@ def moments_amse(k, y):
     xi_3 = np.sqrt(0.5*M2) + 1 - (2/3)*(1 / (1 - M1*M2/M3))
     return (xi_2 - xi_3)**2
 
-def k_finder(y, n, r, kmin, style='hill'):
-    kmax = (np.abs(np.linspace(1./n, 1.0, n) - 1)).argmin()
-    amses = np.zeros((r, n-1))
+@nb.njit
+def finder_loop(y, n, r, style='hill'):
+    amses = np.zeros(n-1)
     for i in range(r):
         sample = np.random.choice(y, n, replace=False)
         sample = np.sort(sample)[::-1]
         k = np.arange(1,n)
 
         if style == 'hill':
-            amses[i] = hill_amse(k,sample)
+            amses += hill_amse(k,sample)
         elif style =='moments':
-            amses[i] = moments_amse(k,sample)
-        else:
-            raise ValueError('`style` not supported')
+            amses += moments_amse(k,sample)
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=RuntimeWarning)
-        amse_for_k = np.nanmean(amses, axis=0)
+    return amses
+
+def k_finder(y, n, r, kmin, style='hill'):
+    kmax = (np.abs(np.linspace(1./n, 1.0, n) - 1)).argmin()
+    amses = finder_loop(y, n, r, style)
+    amse_for_k = amses / n
+
+    # with warnings.catch_warnings():
+    #     warnings.simplefilter("ignore", category=RuntimeWarning)
+    #     amse_for_k = np.nanmean(amses, axis=0)
+
     k = np.nanargmin(amse_for_k[kmin:kmax]) + 1 + kmin
     return k
 

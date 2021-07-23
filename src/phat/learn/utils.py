@@ -46,7 +46,7 @@ class GraphicMixin:
             show_shapes=show_shapes
         )
 
-    def loss_progress(self, history=None, ax=None):
+    def loss_progress(self, history=None, metric='', ax=None):
         history = self.history if history is None else history
         
         if ax is None:
@@ -60,17 +60,19 @@ class GraphicMixin:
         vloss = np.array(history.history['val_loss'])
         vloss = vloss[~np.isnan(vloss)]
 
-        vmean = np.array(history.history['val_mean'])
+        metric = metric if metric else 'val_mean'
+        vmean = np.array(history.history[metric])
         vmean = vmean[~np.isnan(vloss)]
+
         mumin, mumax = np.array(vmean).min(), \
             np.array(vmean).max()
-        stdmin, stdmax = np.array(history.history['val_std']).min(), \
-            np.array(history.history['val_std']).max()
+        # stdmin, stdmax = np.array(history.history['val_std']).min(), \
+        #     np.array(history.history['val_std']).max()
         lossmin, lossmax = np.array(vloss).min(), \
             np.array(vloss).max()
 
-        ms = np.linspace(mumin,mumax)
-        stds = np.linspace(stdmin,stdmax)
+        # ms = np.linspace(mumin,mumax)
+        # stds = np.linspace(stdmin,stdmax)
         ax.axvline(vmean[-1], c='C4', ls='--', lw=2)
 
         ax.set_xlim((
@@ -127,7 +129,7 @@ class DataSplit:
         train_batch, test_batch, val_batch = self._set_batch_sizes(batch_sizes)
 
         y = arrayarize(y)
-        x = arrayarize(x) if x else np.zeros(y.size)
+        x = arrayarize(x) if x is not None else np.zeros(y.size)
         self.raw = self.XY(x.copy(), y.copy())
         self.test_size = test_size
         self.val_size = val_size

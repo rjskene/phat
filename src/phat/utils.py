@@ -17,20 +17,15 @@ def arrayarize(val:Iterable):
         pass
     elif isinstance(val, list_types):
         val = np.array(val)
+    elif isinstance(val, (int, float)):
+        val = np.array([val])
     else:
         text = 'You must provide an iterable of type: '
         text += ', '.join(list_types)
         raise ValueError(text)
     return val
 
-def make_arr(v):
-    if isinstance(v, (float, int)):
-        v = np.array([v])
-    if isinstance(v, (list, tuple, set)):
-        v = np.array(v)
-    return v
-
-def argsetter(kws:Union[Iterable, str]='x', flat=True):
+def argsetter(kws:Union[Iterable, str]='x', flat=False):
     if isinstance(kws, str):
         kws = list(kws)
 
@@ -39,16 +34,28 @@ def argsetter(kws:Union[Iterable, str]='x', flat=True):
         def wrapper(self, *args, **kwargs):
             if args:
                 for k, arg in zip(kws, args):
-                    kwargs[k] = arg if flat else make_arr(arg)
+                    kwargs[k] = arg if flat else arrayarize(arg)
             for k in kws:
                 if k not in kwargs or kwargs[k] is None:                
-                    kwargs[k] = getattr(self, k) if flat else make_arr(getattr(self, k))
+                    kwargs[k] = getattr(self, k) if flat else arrayarize(getattr(self, k))
             
             return func(self, **kwargs)
     
         return wrapper
 
     return deco
+
+def stacker(arr):
+    """
+    arr is numpy array
+    """
+    arr = arrayarize(arr)
+    if arr.ndim == 1:
+        return np.vstack
+    elif arr.ndim == 2:
+        return np.dstack
+    else:
+        raise ValueError(f'`arr` has {arr.ndim}')
 
 class PriceSim:
     def __init__(self, p0:float, rets=None, periods:int=0, n:int=0):
@@ -93,7 +100,7 @@ class PriceSim:
         if not title:
             title = 'Phat Price Simulation'
             
-        plt.suptitle(title, y=1.05)
+        plt.suptitle(title, y=1)
         
         return axes
     
@@ -102,7 +109,10 @@ class PriceSim:
             fig, ax = plt.subplots(1,1,figsize=(10,6))
 
         if 'bins' in kwargs:
-            bins = np.linspace(0, S[:, -1].max(), kwargs['bins'])
+            if isinstance(kwargs['bins'], (float, int)):
+                bins = np.linspace(0, S[:, -1].max(), kwargs['bins'])
+            else:
+                bins = kwargs['bins']
             kwargs.pop('bins')
         else:
             bins = np.linspace(0, S[:, -1].max(), 250)
@@ -111,6 +121,7 @@ class PriceSim:
 
         if not title:
             title = 'Distribution of Ending Share Prices'
+        
         ax.set_title(title)
 
         return ax, bins

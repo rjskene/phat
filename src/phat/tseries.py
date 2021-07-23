@@ -337,6 +337,7 @@ class Garchcaster:
             dist = dist if dist is not None else self._dist
             rvfunc = dist.std_rvs if hasattr(dist, 'std_rvs') else dist.rvs
             innovs = rvfunc(size=(iters, periods))
+
         return innovs
 
     def _backcast(self, resids, maxlag):
@@ -368,6 +369,10 @@ class GarchcastResults:
         self.resids = resids
 
         self.iters, self.periods = values.shape
+
+    @property
+    def vars(self):
+        return self.vols**2
 
     @property
     def sim(self):
@@ -409,8 +414,8 @@ class GarchcastResults:
             if 'p' in kwargs:
                 p = kwargs['p']
                 kwargs.pop('p')
-            ax, P = self._plot_end_price(p=p, ax=ax, *args, **kwargs)
-            return ax, P
+
+            return self._plot_end_price(p=p, ax=ax, *args, **kwargs)
         else:
             raise ValueError(f'`kind:` {kind} not supported')
 
@@ -445,5 +450,5 @@ class GarchcastResults:
 
     def _plot_end_price(self, p, ax:plt.Axes, *args, **kwargs):
         sim = self._make_sim(p=p)
-        _, P, (ax, ____) = sim.sims(rets=1 + self.values/100, ax=ax, show_chart=True, *args, **kwargs)
-        return ax, P
+        _, P, (ax, bins) = sim.sims(rets=1 + self.values/100, ax=ax, show_chart=True, *args, **kwargs)
+        return ax, P, bins

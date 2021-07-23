@@ -40,11 +40,3 @@ Pareto Hybrdis with Asymmetric Tails
    :maxdepth: 3
 
    notebooks/references      
-
-   .. Indices and tables
-   
-.. ==================
-
-.. * :ref:`genindex`
-.. * :ref:`modindex`
-.. * :ref:`search`

@@ -1,8 +1,7 @@
 import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 
-from phat.learn.utils import GraphicMixin
-
+from phat.learn.utils import GraphicMixin, nnelu
 
 def mon_mean(y, y_):
     mu, sigma = tf.unstack(y_, num=2, axis=-1)
@@ -21,12 +20,16 @@ def gnll_loss(y, y_):
 
 class DN(tf.keras.Model, GraphicMixin):
     def __init__(self, neurons=200):
+        tf.keras.backend.set_floatx('float64')
+        tf.keras.utils.get_custom_objects().update({
+            'nnelu': tf.keras.layers.Activation(nnelu),
+            'mean': mon_mean,
+            'std': mon_std
+        })
         super(DN, self).__init__(name="DN")
         self.neurons = neurons
         
-        self.h1 = tf.keras.layers.Dense(neurons, activation="relu", name="h1")
-        self.h2 = tf.keras.layers.Dense(neurons//2, activation="relu", name="h2")
-        self.h3 = tf.keras.layers.Dense(12, activation="relu", name="h3")
+        self.h1 = tf.keras.layers.Dense(neurons, input_shape=(1,), activation='tanh', name='h1')
         
         self.mu = tf.keras.layers.Dense(1, name="mu")
         self.sigma = tf.keras.layers.Dense(1, activation="nnelu", name="sigma")
@@ -34,10 +37,8 @@ class DN(tf.keras.Model, GraphicMixin):
 
     def call(self, inputs):
         x = self.h1(inputs)
-        x = self.h2(x)
-        x = self.h3(x)
         
         mu_v = self.mu(x)
         sigma_v = self.sigma(x)
-
+        
         return self.pvec([mu_v, sigma_v])

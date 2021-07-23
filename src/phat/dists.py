@@ -1,11 +1,13 @@
+from typing import Iterable, Callable
+from functools import wraps
 import numpy as np
 import scipy.stats as scist
 import scipy.special as spec
 from scipy._lib._util import check_random_state
+import statsmodels.api as sm
+from statsmodels.base.model import GenericLikelihoodModel
 
-from functools import wraps
-
-from phat.utils import argsetter, sech_squared
+from phat.utils import argsetter, sech_squared, stacker
 
 def karamata_from_call(call, alf):
     t1 = (alf-1)**(1/alf)
@@ -19,7 +21,7 @@ class BLineSig:
         self.k = k
 
     @argsetter('xk')
-    def cdf(self, x, k:float=None):
+    def sf(self, x, k:float=None):
         return .5*(1 - np.tanh(k*x))
 
     @argsetter('xk')
@@ -62,7 +64,7 @@ class DBLFat(scist.rv_continuous):
             self.dist.pdf(x, shape), 
             self.dist.pdf(-x, shape)
         )
-        return pdf
+        return pdf / 2
     
     @argsetter(['x', 'shape'])
     def _cdf(self, x, shape):
@@ -118,9 +120,9 @@ class CarbenBase:
     https://www.researchgate.net/publication/226293435_A_hybrid_Pareto_model_for_asymmetric_fat-tailed_data_The_univariate_case#pf6
     """
 
-    def __init__(self, shape, mean, sig:float=None, loc:float=None):
+    def __init__(self, shape, mu, sig:float=None, loc:float=None):
         self.shape = shape
-        self.mean = mean
+        self.mu = mu
 
         provided = (sig is None, loc is None)
         if all(provided) or not any(provided):
@@ -136,7 +138,7 @@ class CarbenBase:
             self.scale = self._calc_scale()
             self.sig = self._calc_sig()
                 
-        self.body = scist.norm(self.mean, self.sig)
+        self.body = scist.norm(self.mu, self.sig)
         
     @property
     def tail(self):
@@ -182,7 +184,7 @@ class CarbenBase:
         return num / denom
 
     def _calc_scale_w_loc(self):
-        num = self.loc - self.mean*self.shape
+        num = self.loc - self.mu*self.shape
         denom = np.sqrt(self.W_z())
         return num / denom
 
@@ -210,10 +212,10 @@ class CarbenRight(CarbenBase):
         self._tail = scist.genpareto(self.shape, loc=self.loc, scale=self.scale)
     
     def _calc_loc(self):
-        return self.mean + self.sig*np.sqrt(self.W_z())
+        return self.mu + self.sig*np.sqrt(self.W_z())
 
     def _calc_sig(self):
-        return (self.loc - self.mean) / np.sqrt(self.W_z())
+        return (self.loc - self.mu) / np.sqrt(self.W_z())
 
     @argsetter('x')
     def pdf(self, x=None):
@@ -297,6 +299,17 @@ class CarbenRight(CarbenBase):
         )
         return ppf    
 
+    def mean(self):
+        bmu = scist.truncnorm(
+            -np.inf, 
+            self.loc, 
+            *self.body.args
+        ).mean()
+        tmu = self.tail.mean()
+        rmu = (bmu + tmu) / self.gamma
+
+        return rmu
+
     def var(self):
         bvar = scist.truncnorm(
             -np.inf, 
@@ -315,10 +328,10 @@ class CarbenLeft(CarbenBase):
         self._tail = scist.genpareto(self.shape, loc=-self.loc, scale=self.scale)
 
     def _calc_loc(self):
-        return self.mean - self.sig*np.sqrt(self.W_z())
+        return self.mu - self.sig*np.sqrt(self.W_z())
 
     def _calc_sig(self):
-        return (self.mean - self.loc) / np.sqrt(self.W_z())
+        return (self.mu - self.loc) / np.sqrt(self.W_z())
 
     @argsetter('x')
     def pdf(self, x=None):
@@ -388,6 +401,17 @@ class CarbenLeft(CarbenBase):
         )
         return ppf
 
+    def mean(self):
+        bmu = scist.truncnorm(
+            self.loc,
+            np.inf, 
+            *self.body.args
+        ).mean()
+        tmu = -self.tail.mean()
+        lmu = (bmu + tmu) / self.gamma
+
+        return lmu
+
     def var(self):
         bvar = scist.truncnorm(
             self.loc,
@@ -401,12 +425,12 @@ class CarbenLeft(CarbenBase):
 class CarbenHybrid:    
     def __new__(cls, *args, **kwargs):
         args = list(args)
-        shape_is_arg =  len(args) >= 2
-        shape = args[1] if shape_is_arg else kwargs['shape']
+        shape_is_arg =  len(args) >= 0
+        shape = args[0] if shape_is_arg else kwargs['shape']
         
-        rtail_is_arg = len(args) >= 6
+        rtail_is_arg = len(args) >= 5
         if rtail_is_arg:
-            rtail = args.pop(5)
+            rtail = args.pop(4)
         else:
             rtail = kwargs.pop('rtail') if 'rtail' in kwargs else True
 
@@ -419,7 +443,7 @@ class CarbenHybrid:
             elif shape < 0:
                 rtail = False
                 if shape_is_arg:
-                    args[1] = -shape
+                    args[0] = -shape
                 else:
                     kwargs['shape'] = shape
 
@@ -442,17 +466,6 @@ def dotweight(func):
 
     return wrapper
 
-def stacker(arr):
-    """
-    arr isn numpy array
-    """
-    if arr.ndim == 1:
-        return np.vstack
-    elif arr.ndim == 2:
-        return np.dstack
-    else:
-        raise ValueError(f'`arr` has {arr.ndim}')
-
 class Phat:
     """    
     Two-tailed symmetric OR assymmetric hybrid distribution that combines:
@@ -469,7 +482,7 @@ class Phat:
     has 8 parameters:
         > Left tail: shape, loc, scale
         > Right tail: shape, loc, scale
-        > Center: mean, sig
+        > Center: mu, sig
 
     As with any mixture model, this mix is the weighted average result of values from the two
     components. Default weights are 0.5 / 0.5.
@@ -479,25 +492,25 @@ class Phat:
 
     https://www.cs.toronto.edu/~rgrosse/csc321/mixture_models.pdf
     """
-    PARAM_NAMES = ['mean', 'sig', 'shape_l',  'shape_r', 'loc_l', 'loc_r', 'scale_l', 'scale_r']
-    def __init__(self, mean:float, sig:float, shape_l:float, shape_r:float, p=None):
+    PARAM_NAMES = ['mu', 'sig', 'shape_l',  'shape_r', 'loc_l', 'loc_r', 'scale_l', 'scale_r']
+    def __init__(self, mu:float, sig:float, shape_l:float, shape_r:float, p=None):
         """
-        Reverse the mean in the Left tail so that both tails
-        are centered around the same mean
+        Reverse the mu in the Left tail so that both tails
+        are centered around the same mu
         """
-        self.mean = mean
+        self.mu = mu
         self.sig = sig
         self.shape_l = shape_l if isinstance(shape_l, float) and shape_l >= 0 else -shape_l
         self.shape_r = shape_r
 
-        self.left = CarbenHybrid(shape_l, mean, sig, rtail=False)
-        self.right = CarbenHybrid(shape_r, mean, sig)
+        self.left = CarbenHybrid(shape_l, mu, sig, rtail=False)
+        self.right = CarbenHybrid(shape_r, mu, sig)
 
         self.p = p if p is not None else np.array([.5,.5])
     
     @property
     def args(self):
-        return self.mean, self.sig, self.shape_l, self.shape_r, self.left.loc, \
+        return self.mu, self.sig, self.shape_l, self.shape_r, self.left.loc, \
             self.right.loc, self.left.scale, self.right.scale
 
     @property
@@ -527,6 +540,9 @@ class Phat:
     def ppf(self, q):
         return stacker(q)((self.left.ppf(q), self.right.ppf(q)))
 
+    def loglike(self, x=None):
+        return np.log(self.pdf(x))
+
     @argsetter('x')
     def nll(self, x=None):
         return -np.log(self.pdf(x))
@@ -543,6 +559,10 @@ class Phat:
         return Y
 
     @dotweight
+    def mean(self):
+        return np.array([self.left.mean(), self.right.mean()])
+
+    @dotweight
     def var(self):
         return np.array([self.left.var(), self.right.var()])
 
@@ -552,3 +572,50 @@ class Phat:
     def std_rvs(self, *args, **kwargs):
         return self.rvs(*args, **kwargs) / self.std()
 
+    @staticmethod
+    def fit(values, shape_l:float=None, shape_r:float=None):
+        exog = sm.add_constant(np.zeros_like(values), prepend=True)
+        phatfit = PhatFit(values, exog, shape_l, shape_r)
+        return phatfit.fit()
+    
+class PhatFit(GenericLikelihoodModel):
+    def __init__(self, 
+        endog:Iterable, 
+        exog:Iterable,
+        xi_left:float=None, 
+        xi_right:float=None, 
+        tail_est:Callable=None,
+        **kwds):
+        
+        if xi_right is None and xi_left is None and tail_est is not None:
+            self.xi_left, self.xi_right = tail_est(endog)
+        else:
+            self.xi_left, self.xi_right = xi_left, xi_right
+            
+        super().__init__(endog, exog, **kwds)
+
+    def nloglikeobs(self, params):
+        if len(params) == 4:
+            phatdist = Phat(*params)
+        else:
+            phatdist = Phat(params[0], params[1], self.xi_left, self.xi_right)
+        return phatdist.nll(self.endog)
+
+    def fit(self, start_params=None, maxiter=10000, maxfun=5000, **kwds):
+        if start_params == None:
+            if self.xi_left is None and self.xi_right is None:
+                self.exog_names.append('xi_l')
+                self.exog_names.append('xi_r')
+                start_params = np.zeros(4)
+                start_params[:2] = scist.norm.fit(self.endog)
+                start_params[-2:] = [.2, .2]
+            else:
+                start_params = np.zeros(2)
+                start_params = scist.norm.fit(self.endog)
+            
+        return super().fit(
+            start_params=start_params,
+            maxiter=maxiter, maxfun=maxfun,
+            **kwds
+        )
+        

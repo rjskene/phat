@@ -171,12 +171,12 @@ class PhatLoss(tf.keras.losses.Loss):
         tail_loss = self.TailLoss(y, shapes_)
         return body_loss / (tail_loss + 1)
 
-class PhatBeta(tf.keras.Model, GraphicMixin):
+class PhatNetBeta(tf.keras.Model, GraphicMixin):
     def __init__(self, neurons=4):
         tf.keras.backend.set_floatx('float64')
-        super(PhatBeta, self).__init__(name='PhatNet')
+        super(PhatNetBeta, self).__init__(name='PhatNet')
         
-        self.h1 = tf.keras.layers.Dense(neurons, input_shape=(1,), activation='tanh', name='h1')
+        self.h1 = tf.keras.layers.Dense(neurons, input_shape=(1,), name='h1')
 
         self.mu = tf.keras.layers.Dense(1, name='mu')
         self.sigma = tf.keras.layers.Dense(1, activation='softplus', name='sigma')
@@ -285,10 +285,10 @@ class WeightsCallBack(tf.keras.callbacks.Callback):
 
 class PhatNet(tf.keras.Model, GraphicMixin):
     PARAM_NAMES = ['mean', 'sig', 'shape_l', 'shape_r']
-    def __init__(self, neurons=4):
-        super(PhatNet, self).__init__(name='PhatNet')
-
+    def __init__(self, neurons=1):
         tf.keras.backend.set_floatx('float64')
+
+        super(PhatNet, self).__init__(name='PhatNet')
             
         self.h1 = tf.keras.layers.Dense(neurons, input_shape=(1,), name='h1')
 
@@ -300,9 +300,9 @@ class PhatNet(tf.keras.Model, GraphicMixin):
         self.body = tf.keras.layers.Concatenate(name='body')
         self.tails = tf.keras.layers.Concatenate(name='tails')
                 
-    def call(self, xy):
-        x = self.h1(xy)
-        
+    def call(self, x):
+        x = self.h1(x)
+
         mu_v = self.mu(x)
         sigma_v = self.sigma(x)
         shape_l_v = self.shape_l(x)
