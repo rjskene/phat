@@ -56,7 +56,7 @@ Unfortunately, for two-tailed phenomenon like financial asset returns, there are
 
 + Levy-Stable Distribution 
     + the Levy-Stable is bounded in the range alpha (0, 2] with alpha = 2 being the Gaussian distribution. Thus, the Levy-Stable *only* exhibits fat tails with tail index alpha < 2.
-    + Unfortunately, equity returns in particular are known to have both a [second moment](https://fan.princeton.edu/fan/FinEcon/chap1.pdf) AND fat tails ([see Danielsson and de Vries 1997](references.ipynb)), meaning $\alpha > 2$, which the Levy-Stable does not support.
+    + Unfortunately, equity returns in particular are known to have both a [second moment](https://fan.princeton.edu/fan/FinEcon/chap1.pdf) AND fat tails ([see Danielsson and de Vries 1997](references.ipynb)), meaning alpha > 2, which the Levy-Stable does not support.
 + Student's T
     + the Student's T is the most popular distribution for modelling asset returns as it does exhibit modest fat tails and is power law-*like*.
     + unfortunately, the Student's T only *tends* toward a power law in the extreme tails and so can still heavily underestimate extreme events.
@@ -64,7 +64,7 @@ Unfortunately, for two-tailed phenomenon like financial asset returns, there are
 
 ## the Phat Distribution ##
 
-The Phat distribution is an attempt to address the issues of fat-tails in two-tailed data. It is a mixture model of two Pareto hybrid distributions, as described in [2009 by Julie Carreau and Yoshua Bengio](https://www.researchgate.net/publication/226293435_A_hybrid_Pareto_model_for_asymmetric_fat-tailed_data_The_univariate_case) (and dubbed by us as the "Carben" distribution). The Carben is a piece-wise combination of a single Gaussian distribution and a generalized Pareto distribution fused at the Pareto location, $a$.
+The Phat distribution is an attempt to address the issues of fat-tails in two-tailed data. It is a mixture model of two Pareto hybrid distributions, as described in [2009 by Julie Carreau and Yoshua Bengio](https://www.researchgate.net/publication/226293435_A_hybrid_Pareto_model_for_asymmetric_fat-tailed_data_The_univariate_case) (and dubbed by us as the "Carben" distribution). The Carben is a piece-wise combination of a single Gaussian distribution and a generalized Pareto distribution fused at the Pareto location, a.
 
 The result is a distribution with Gaussian-body and distinct Pareto power laws in either tail. The distribution requires only 4 parameters:
 
@@ -175,7 +175,7 @@ pnet.predicted_params()
 
 
 
-Below we compare the fit of the Phat distribution to that of the Guassian and the Student's T. Note the Student's T fits to $v=4.65$, which is equivalent to $\xi = 0.22$, which is a thinner tail than found through the Hill Double bootstrap, particularly for the left tail.
+Below we compare the fit of the Phat distribution to that of the Guassian and the Student's T. Note the Student's T fits to v=4.47, which is equivalent to xi = 0.22, which is a thinner tail than found through the Hill Double bootstrap, particularly for the left tail.
 
 
     
