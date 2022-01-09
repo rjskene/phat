@@ -3,7 +3,7 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Pareto Hybrdis with Asymmetric Tails
+Pareto Hybrids with Asymmetric Tails
 ======================================
 
 .. toctree::
@@ -23,7 +23,7 @@ Pareto Hybrdis with Asymmetric Tails
    :caption: Fit
    :maxdepth: 3
 
-   notebooks/pot
+   notebooks/pot_ref
    notebooks/dblbs
    notebooks/mle_fit
    notebooks/nn_fit

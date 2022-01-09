@@ -1,3 +1,8 @@
+"""
+Tensorflow does not support scipy, therefore, all distributions in 
+phat/dists.py must be replicated via tensorflow_probability 
+"""
+
 import numpy as np
 
 import tensorflow as tf
@@ -34,11 +39,6 @@ def if_not_empty(x, idx):
 # tf.print('loc', self.loc[0], self.scale[0], self.mean[0], self.std[0], self.shape[0])
 # tf.print('idx', if_not_empty(x, idx), -if_not_empty(x, idx) + 10**-1, idx)
 
-### DISTRIBUTIONS FOR TENSORFLOW ###
-"""
-Inheritance from `phat.py` not used as almost all
-functions require execution with `tf` module equivalents
-"""
 def gptf_prob(
     gptf,
     x,

@@ -1,9 +1,15 @@
+"""
+Collection of helper functions
+"""
+
 import numpy as np
 import pandas as pd
 from functools import wraps
-from typing import Union, Iterable
+from typing import Union, Iterable, Callable, Sequence
 
 import matplotlib.pyplot as plt
+
+XTYPE = Union[float, Iterable[Sequence[float]]]
 
 def cosh_squared(x,k):
     return .5*(np.cosh(2*k*x) + 1)
@@ -12,6 +18,9 @@ def sech_squared(x,k):
     return 1 / cosh_squared(x, k)
 
 def arrayarize(val:Iterable):
+    """
+    Converts list-like objects to np.ndarray
+    """
     list_types = (list, tuple, set, pd.Series)
     if isinstance(val, np.ndarray):
         pass
@@ -45,6 +54,28 @@ def argsetter(kws:Union[Iterable, str]='x', flat=False):
 
     return deco
 
+def dotweight(func) -> Callable:
+    """
+    Takes the weighted average of values in the array `stack`
+    Weights provided by array `p`. average found via dot product.
+
+    Used as a wrapper for class methods: `p` must be an attribute of the class instance
+
+    Returns
+    --------
+    np.ndarray; max 3 dimensions, the weighted averages along one dimension of `stack`
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs) -> np.ndarray:
+        stack = func(self, *args, **kwargs)
+        if stack.ndim == 3:
+            p = np.tile(self.p, (stack.shape[0],stack.shape[1],1))
+            return np.multiply(p, stack).sum(axis=2)
+        else:
+            return (self.p @ stack)
+
+    return wrapper
+
 def stacker(arr):
     """
     arr is numpy array
@@ -58,6 +89,9 @@ def stacker(arr):
         raise ValueError(f'`arr` has {arr.ndim}')
 
 class PriceSim:
+    """
+    Handler for generating price time-series from a set of return time-series
+    """
     def __init__(self, p0:float, rets=None, periods:int=0, n:int=0):
         self.p0 = p0
         self.rets = rets
@@ -67,14 +101,18 @@ class PriceSim:
     @argsetter(['p0', 'rets', 'periods'])
     def sim(self, p0=None, rets=None, periods=None, show_chart:bool=False, *args, **kwargs):
         S = p0*rets.cumprod()
-        
         if show_chart:
             return rets, S, self.sim_chart(rets, S, periods, *args, **kwargs)
         else:
             return rets, S
 
-    @argsetter(['p0', 'rets', 'periods', 'n'])
-    def sims(self, p0:float=None, rets=None, periods:int=None, n:int=None, show_chart:bool=False, *args, **kwargs):        
+    @argsetter(['p0', 'rets'], flat=True)
+    def sims(self, 
+        p0:float=None, 
+        rets=None, 
+        show_chart:bool=False, 
+        *args, **kwargs
+    ):
         S = p0*rets.cumprod(axis=1)
         
         if show_chart:

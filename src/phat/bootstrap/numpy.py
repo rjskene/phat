@@ -1,5 +1,14 @@
-from typing import Iterable
-import warnings
+"""
+Numpy-based functions for estimating tail index
+via the Hill Double Bootstrap method.
+
+Process is effectively detailed in Voitalov 2019:
+https://journals.aps.org/prresearch/pdf/10.1103/PhysRevResearch.1.033034
+
+See Documentation for more.
+"""
+
+from typing import Iterable, Union, Tuple
 import numpy as np
 
 import numba as nb
@@ -18,16 +27,20 @@ def moments_dbs_prefactor(xi_n, n1, k1):
     """ 
     Function to calculate pre-factor used in moments
     double-bootstrap procedure.
-    Args:
-        xi_n: moments tail index estimate corresponding to
-              sqrt(n)-th order statistic.
-        n1:   size of the 1st bootstrap in double-bootstrap
-              procedure.
-        k1:   estimated optimal order statistic based on the 1st
-              bootstrap sample.
-    Returns:
-        prefactor: constant used in estimation of the optimal
-                   stopping order statistic for moments estimator.
+    
+    Params
+    -------
+    xi_n: moments tail index estimate corresponding to
+            sqrt(n)-th order statistic.
+    n1:   size of the 1st bootstrap in double-bootstrap
+            procedure.
+    k1:   estimated optimal order statistic based on the 1st
+            bootstrap sample.
+    
+    Returns
+    --------
+    prefactor: constant used in estimation of the optimal
+                stopping order statistic for moments estimator.
     """
     def V_sq(xi_n):
         if xi_n >= 0:
@@ -148,10 +161,6 @@ def k_finder(y, n, r, kmin, style='hill'):
     amses = finder_loop(y, n, r, style)
     amse_for_k = amses / n
 
-    # with warnings.catch_warnings():
-    #     warnings.simplefilter("ignore", category=RuntimeWarning)
-    #     amse_for_k = np.nanmean(amses, axis=0)
-
     k = np.nanargmin(amse_for_k[kmin:kmax]) + 1 + kmin
     return k
 
@@ -193,7 +202,13 @@ def dbl_bs(y, t=.5, r=500, style='hill', A_type='qi'):
 
     return xi[k_star]
 
-def two_tailed_hill_double_bootstrap(values:Iterable[float], iters:int=10, return_mean:bool=True):
+def two_tailed_hill_double_bootstrap(
+    values:Iterable[float], 
+    iters:int=10, 
+    return_mean:bool=True,
+    pbar_kwargs:dict={},
+    ) -> Union[Tuple[Iterable], Tuple[float]]:
+    
     left = values[values < values.mean()]
     left = np.sort(-left)[::-1]
 
@@ -203,7 +218,7 @@ def two_tailed_hill_double_bootstrap(values:Iterable[float], iters:int=10, retur
     np.seterr(all='ignore')
     shl = np.zeros(iters)
     shr = np.zeros(iters)
-    for i in trange(iters):
+    for i in trange(iters, **pbar_kwargs):
         shl[i] = dbl_bs(left, t=.5, r=500, style='hill', A_type='dani')
         shr[i] = dbl_bs(right, t=.5, r=500, style='hill', A_type='dani')
     

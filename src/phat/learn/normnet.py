@@ -1,3 +1,6 @@
+"""
+Gaussian-based neural network
+"""
 import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 

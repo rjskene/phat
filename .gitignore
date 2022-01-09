@@ -141,3 +141,4 @@ cython_debug/
 README.ipynb
 .python-version
 .mp4
+thold.py
