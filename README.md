@@ -55,7 +55,7 @@ Many phenomena are understood to exhibit fat tails: insurance losses, wealth dis
 Unfortunately, for two-tailed phenomenon like financial asset returns, there are only two imperfect candidates:
 
 + Levy-Stable Distribution 
-    + the Levy-Stable is bounded in the range <img src="https://latex.codecogs.com/gif.latex?O_t=\alpha \in (0, 2]" /> with $\alpha = 2$ being the Gaussian distribution. Thus, the Levy-Stable *only* exhibits fat tails with tail index $\alpha < 2$
+    + the Levy-Stable is bounded in the range alpha (0, 2] with alpha = 2 being the Gaussian distribution. Thus, the Levy-Stable *only* exhibits fat tails with tail index alpha < 2.
     + Unfortunately, equity returns in particular are known to have both a [second moment](https://fan.princeton.edu/fan/FinEcon/chap1.pdf) AND fat tails ([see Danielsson and de Vries 1997](references.ipynb)), meaning $\alpha > 2$, which the Levy-Stable does not support.
 + Student's T
     + the Student's T is the most popular distribution for modelling asset returns as it does exhibit modest fat tails and is power law-*like*.
@@ -68,17 +68,17 @@ The Phat distribution is an attempt to address the issues of fat-tails in two-ta
 
 The result is a distribution with Gaussian-body and distinct Pareto power laws in either tail. The distribution requires only 4 parameters:
 
-+ $\mu, \sigma$ in the Gaussian body
-+ $\xi_{\text{left}}, \xi_{\text{right}}$, being the inverse tail index for either Paretian tail.
++ mu, sigma in the Gaussian body
++ xi_left, xi_right, being the inverse tail index for either Paretian tail.
 
-Below, we show a Phat distribution with a standard normal body and symmetric Paretian tails with $\xi = .2$ (corresponding to $\alpha = 5$), highlighting the distributions different sections.
+Below, we show a Phat distribution with a standard normal body and symmetric Paretian tails with xi = .2 (corresponding to alpha=5), highlighting the distributions different sections.
 
     
 ![png](imgs/output_7_0.png)
     
 
 
-The Paretian tails are parameterized independently and so allow for asymmetry. Below we show two Phat distributions, one with symmetric tail index of $\alpha=2$ and the other with asymmetric tail indices, $\alpha_{\text{left}}=2$ and $\alpha_{\text{right}}=20$.
+The Paretian tails are parameterized independently and so allow for asymmetry. Below we show two Phat distributions, one with symmetric tail index of alpha=2 and the other with asymmetric tail indices, alpha_left=2 and alpha_right=20.
 
 
     
