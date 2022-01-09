@@ -10,6 +10,10 @@ from phat.learn.utils import GraphicMixin, splitter
 logger = tf.get_logger()
 
 class PhatMetric(tf.keras.metrics.Metric):
+    """
+    Custom tensorflow metric that updates the Phat distribution parameters
+    """
+ 
     param_names = ['mean', 'std', 'loc', 'scale', 'shape']
     ends = ['right', 'left']
     ALLOWED_NAMES = ['_'.join(tup) for tup in it.product(param_names, ends)]
