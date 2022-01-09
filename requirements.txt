@@ -34,7 +34,7 @@ guzzle-sphinx-theme==0.7.11
 h5py==3.1.0
 idna==3.2
 imagesize==1.2.0
-importlib-metadata==4.6.1
+importlib-metadata>=4.6.1
 ipykernel==6.0.2
 ipython==7.25.0
 ipython-genutils==0.2.0
