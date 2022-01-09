@@ -81,7 +81,7 @@ parso==0.8.2
 patsy==0.5.1
 pep517==0.11.0
 pexpect==4.8.0
--e git+ssh://git@github.com/rskene/phat.git@faa0ba6c2cc7cb92d56e91fbec3bb94a62f90e48#egg=phat_tails
+phat-tails==0.0.9
 pickleshare==0.7.5
 Pillow==8.3.1
 pkginfo==1.8.2
