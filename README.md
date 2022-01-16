@@ -1,8 +1,18 @@
-# Pareto Hybrids w Asymmetric Tails #
+# P.H.A.T. - **P**areto **H**ybrids with **A**symmetric **T**ails #
 
-The Phat distribution is a two-tailed, fully-continuous, well-defined asymmetric power law probability distribution.
+The **Phat** distribution is an attempt to address the issues of fat tails in two-tailed data. It is a two-tailed, fully-continuous, well-defined asymmetric power law probability distribution. 
 
-The **phat** package makes available several methods to fit a given time-series dataset to the parameters of the Phat distribution and produce a forecast with the results.
+It is a mixture model of two Pareto hybrid distributions, as described in [2009 by Julie Carreau and Yoshua Bengio](https://www.researchgate.net/publication/226293435_A_hybrid_Pareto_model_for_asymmetric_fat-tailed_data_The_univariate_case) (and dubbed by us as the "Carben" distribution), with:
+
++ Gaussian body 
++ distinct Pareto power laws in either tail.
+
+The distribution requires only 4 parameters:
+
++ mu, sigma in the Gaussian body
++ xi_left, xi_right, being the inverse tail index (1/alpha) for either Paretian tail.
+
+The **phat-tails** package makes available several methods to fit a given time-series dataset to the parameters of the Phat distribution and produce a forecast with the results.
 
 ## Documentation ##
 [![Documentation Status: latest](https://img.shields.io/readthedocs/ipywidgets?logo=read-the-docs)](https://phat.readthedocs.io/en/latest)
@@ -14,6 +24,227 @@ Installation available via `pip`
 ```console
 $ pip install phat-tails
 ```
+
+## Quickstart ##
+
+All pertinent classes and functions are imported via the module `phat`.
+
+
+```python
+%load_ext autoreload
+%autoreload 2
+```
+
+
+```python
+import phat as ph
+```
+
+The probability distribution is found in the main class, `Phat`, which mimics the structure of the [continuous distributions found in scipy.stats](https://docs.scipy.org/doc/scipy/tutorial/stats/continuous.html#continuous-distributions-in-scipy-stats). 
+
+We pass the four parameters to instantiate the distribution. For simplicity, we will show the distribution with equal tail indices initially.
+
+
+```python
+mean, sig, shape = 0, 1, 1/5
+phat_dist = ph.Phat(mean, sig, shape, shape)
+```
+
+Below is a complete rendering of the distribution, with breakdown among the component Gaussian and Pareto tails.
+
+    
+![png](imgs/output_9_0.png)
+    
+
+
+Below we demonstrate the ability to generate asymmetric tails. We overlay two different Phat distributions, one with symmetric tail indices of alpha = 2 and the other with *asymmetric* tail indices, alpha = 2 and alpha_right = 20.
+
+We can see that the left tails are identical. In the right tails, the distributions appear to differ only modestly, however, [this difference leads to dramatically different effects](demo.ipynb#Compare-Fit-with-Gaussian-and-T).
+
+
+```python
+mean, sig = 0, 1
+shape_l1, shape_r = 1/2, 1/2
+dist1 = ph.Phat(mean, sig, shape_l1, shape_r)
+shape_l2, shape_r = 1/2, 1/20
+dist2 = ph.Phat(mean, sig, shape_l2, shape_r,)
+```
+
+    
+![png](output_12_0.png)
+    
+
+
+The `Phat` class has common methods such as `pdf`, `cdf`, `sf`, `ppf`. It can also calculate negative log-likelihood and first and second moments. Derivations are [found here](moments.ipynb).
+
+
+```python
+mean, sig, shape_l, shape_r = 0,1, 1/5, 1/4
+phat_dist = ph.Phat(mean, sig, shape_l, shape_r)
+phat_dist.pdf(10)
+```
+
+
+
+
+    array([0.00482994])
+
+
+
+
+```python
+phat_dist.cdf([.05,1,-0.1])
+```
+
+
+
+
+    array([0.51144212, 0.70624103, 0.47567736])
+
+
+
+
+```python
+phat_dist.sf([.05])
+```
+
+
+
+
+    array([0.48855788])
+
+
+
+
+```python
+assert phat_dist.sf([.05]) == 1 - phat_dist.cdf([.05])
+```
+
+
+```python
+import numpy as np
+phat_dist.ppf(np.linspace(0,1,5))
+```
+
+
+
+
+    array([       -inf, -1.63735173,  0.00569209,  1.68013031,         inf])
+
+
+
+
+```python
+phat_dist.nll(1) # Negative Log-Likelihood
+```
+
+
+
+
+    array([1.8510368])
+
+
+
+
+```python
+phat_dist.mean()
+```
+
+
+
+
+    0.0796142959815449
+
+
+
+
+```python
+phat_dist.std()
+```
+
+
+
+
+    3.7926873955033087
+
+
+
+It can also generate random variables (and standardized random variables).
+
+
+```python
+phat_dist.rvs(20)
+```
+
+
+
+
+    array([  0.26230724,  -2.86701052,   1.10667151,  -1.44804104,
+            -1.11322731,  -1.02824889,  -1.85262802,   1.8933799 ,
+            16.08664357, -12.73459004,   1.37070181,   2.57394117,
+             1.64309126,  -0.56376192,  -1.60433492, -19.06879003,
+             5.0930153 ,  -2.66486303,  -0.58754918,  -3.191044  ])
+
+
+
+
+```python
+phat_dist.std_rvs(20)
+```
+
+
+
+
+    array([-0.42959327, -0.76187685, -0.79643119, -0.81966234, -1.71745892,
+            0.16728373, -0.1375456 ,  0.36916545,  3.5360414 , -0.62137662,
+           -0.37860114,  1.14978021, -1.04659032, -0.12308385,  0.62170651,
+           -0.5693838 ,  0.50893717, -0.0747743 ,  0.5675617 ,  0.15844071])
+
+
+
+Importantly, Phat captures the undefined moments that result when alpha < 2.
+
+
+```python
+shape_l, shape_r, mean, sig = 1, 1, 0, 1
+phat_dist = ph.Phat(mean, sig, shape_l, shape_r)
+```
+
+
+```python
+phat_dist.mean()
+```
+
+    /Users/spindicate/Documents/programming/investing/analysis/options/phat/src/phat/utils.py:75: RuntimeWarning: invalid value encountered in matmul
+      return (self.p @ stack)
+
+
+
+
+
+    nan
+
+
+
+
+```python
+phat_dist.var()
+```
+
+
+
+
+    nan
+
+
+
+`Phat` has a `fit` method, which generates a [standard Maximum Likelihood Estimate (MLE)](mle_fit.ipynb), *although this is not the recommended approach to fitting this distribution*.
+
+In addition to the main distribution class, the package also provides:
+
++ `ph.two_tailed_hill_double_bootstrap`: [a method for estimating both tail indices of a dataset simultaneously](dblbs.ipynb)
++ `ph.PhatNet`: [a simple neural network that provides improved fit relative to MLE](nn_fit.ipynb), which includes a custom loss function called `PhatLoss`.
++ `ph.Garchcaster`: [a class for generating time-series forecasts from ARMA and GARCH models that incorporates Phat random innovations](phatgarch.ipynb).
 
 ## Dependencies ##
 
@@ -29,13 +260,14 @@ $ pip install phat-tails
 + arch 4.19
 + pmdarima 1.8.2
 + tqdm 4.61.2
+
 Also see requirements and compatibility specifications for [Tensorflow](https://www.tensorflow.org/install) and [Numba](https://numba.readthedocs.io/en/stable/user/installing.html)
 
 ### Suggested ###
-+ [tensorboard](https://www.tensorflow.org/tensorboard/get_started): monitoring dashboard for tensorflow
++ [tensorboard](https://www.tensorflow.org/tensorboard/get_started): monitoring tool for tensorflow
 + [yfinance](https://github.com/ranaroussi/yfinance): for downloading historical price data
 
-## Also Check Out ##
+### Also Check Out ###
 
 + [tail-estimation](https://github.com/ivanvoitalov/tail-estimation)
     + built as part of [Ivan Voitalov et al (2019)](https://journals.aps.org/prresearch/pdf/10.1103/PhysRevResearch.1.033034) on tail index estimation techniques for power law phenomenon in scale-free networks
@@ -52,248 +284,3 @@ Potential enhancements under consideration:
 + incorporation of Phat innovations into `fit` of AR-GARCH or ARMA-GARCH via custom model
 + generalization to additional GARCH models
 + better optimization of `Garchcaster.forecast` method
-+ simplify `Garchcaster` interface
-
-## The Issue with Fat Tails ##
-
-Many phenomena are understood to exhibit fat tails: insurance losses, wealth distribution, [rainfall](https://hess.copernicus.org/articles/17/851/2013/hess-17-851-2013.pdf), etc. These are one-tailed phenomenom (usually bounded by zero) for which many potential distributions are applicable: Weibull, Levy, Frechet, Paretos I-IV, the generalized Pareto, the Extreme Value distribution etc.
-
-Unfortunately, for two-tailed phenomenon like financial asset returns, there are only two imperfect candidates:
-
-+ Levy-Stable Distribution 
-    + the Levy-Stable is bounded in the range alpha -> (0, 2] with alpha = 2 being the Gaussian distribution. Thus, the Levy-Stable *only* exhibits fat tails with tail index alpha < 2
-    + Unfortunately, equity returns in particular are known to have both a [second moment](https://fan.princeton.edu/fan/FinEcon/chap1.pdf) AND fat tails ([see Danielsson and de Vries 1997](references.ipynb)), meaning alpha > 2, which the Levy-Stable does not support.
-+ Student's T
-    + the Student's T is the most popular distribution for modelling asset returns as it does exhibit modest fat tails and is power law-*like*.
-    + unfortunately, the Student's T only *tends* toward a power law in the extreme tails and so can still heavily underestimate extreme events.
-    + also, the Student's T is symmetric and cannot accomodate different tail indices in either tail. Nor can the skewed Student's T, which is asymmetric, but accepts only a single tail index (although recently an asymmetric Student's T has [been proposed](https://www.sciencedirect.com/science/article/abs/pii/S0304407610000266)).
-
-## the Phat Distribution ##
-
-The Phat distribution is an attempt to address the issues of fat-tails in two-tailed data. It is a mixture model of two Pareto hybrid distributions, as described in [2009 by Julie Carreau and Yoshua Bengio](https://www.researchgate.net/publication/226293435_A_hybrid_Pareto_model_for_asymmetric_fat-tailed_data_The_univariate_case) (and dubbed by us as the "Carben" distribution). The Carben is a piece-wise combination of a single Gaussian distribution and a generalized Pareto distribution fused at the Pareto location, a.
-
-The result is a distribution with Gaussian-body and distinct Pareto power laws in either tail. The distribution requires only 4 parameters:
-
-+ mu, sigma in the Gaussian body
-+ xi_left, xi_right, being the inverse tail index for either Paretian tail.
-
-Below, we show a Phat distribution with a standard normal body and symmetric Paretian tails with xi = .2 (corresponding to alpha = 5), highlighting the distributions different sections.
-
-
-```python
-import numpy as np
-import scipy.stats as scist
-import matplotlib.pyplot as plt
-import seaborn as sns; sns.set(style = 'whitegrid')
-
-import numba as nb
-import phat as ph
-
-shape, mean, sig = 1/5, 0, 1
-x = np.linspace(-5+mean, 5+mean, 1000)
-phat_dist = ph.Phat(mean, sig, shape, shape)
-```
-    
-![png](imgs/output_7_0.png)
-    
-The Paretian tails are parameterized independently and so allow for asymmetry. Below we show two Phat distributions, one with symmetric tail index of alpha = 2 and the other with asymmetric tail indices, alpha_left = 2 and alpha_right = 20.
-
-
-```python
-mean, sig = 0, 1
-x = np.linspace(-4+mean, 7+mean, 1000)
-shape_l1, shape_r = 1/2, 1/2
-dist1 = ph.Phat(mean, sig, shape_l1, shape_r)
-shape_l2, shape_r = 1/2, 1/20
-dist2 = ph.Phat(mean, sig, shape_l2, shape_r,)
-```
-
-![png](imgs/output_9_0.png)
-    
-
-
-The left tails are identical. In the right tails, the distribution with the greater tail index has a slightly lower probability in the body and a slightly higher probability out in the tails, leading to dramatically different effects.
-
-## Demo ##
-
-Below we show a simple process for fitting and projecting a financial time series using `phat`; this example will utilize end-of-day daily prices of Coca-Cola, for which there is data back to 1962.
-
-the Fit:
-
-+ download the daily prices of Coca-Cola (ticker: KO). Find the daily returns in percentage terms (i.e. x 100).
-+ use the `arch` package to fit a GARCH(1,1) model to the daily returns
-+ use the Hill double bootstrap method to estimate the tail index of both tails of the standardized residuals of the AR-GARCH fit.
-+ use `phat` custom data class, `DataSplit`, to split the data into training, testing, and validation subsets. *Be careful to scale by 1/10.*
-+ use `PhatNet` and `phat`'s custom loss function `PhatLoss` to fit the remaining parameters.
-+ use `Garchcaster` to produce 10,000 simulations of a one-year forecast via the same AR-GARCH model.
-
-
-```python
-import yfinance as yf
-import arch
-
-ko = yf.download('KO')
-ko_ret = ko.Close.pct_change().dropna()*100
-ko_ret = ko_ret[-252*20:]
-```
-
-    [*********************100%***********************]  1 of 1 completed
-
-
-
-```python
-res = arch.arch_model(ko_ret, mean='Constant', vol='Garch', p=1, q=1).fit(disp='off')
-xi_left, xi_right = ph.two_tailed_hill_double_bootstrap(res.std_resid)
-
-data = ph.DataSplit(res.std_resid[2:]/10)
-pnet = ph.PhatNet(neurons=1)
-pnet.compile(
-    loss = ph.PhatLoss(xi_left,xi_right), 
-    optimizer = 'adam'
-)
-history = pnet.fit(data.train, validation_data=data.test, epochs=100, verbose=0)
-```
-
-
-The training process above results in the following estimated parameters for the standardized GARCH residuals.
-
-
-```python
-pnet.predicted_params()
-```
-
-
-
-
-<div>
-<table border="1" class="dataframe">
-  <thead>
-    <tr style="text-align: right;">
-      <th></th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <th>mean</th>
-      <td>-0.006002</td>
-    </tr>
-    <tr>
-      <th>sig</th>
-      <td>0.035405</td>
-    </tr>
-    <tr>
-      <th>shape_l</th>
-      <td>0.313219</td>
-    </tr>
-    <tr>
-      <th>shape_r</th>
-      <td>0.269242</td>
-    </tr>
-  </tbody>
-</table>
-</div>
-
-
-
-Below we compare the fit of the Phat distribution to that of the Guassian and the Student's T. Note the Student's T fits to v = 4.65, which is equivalent to xi = 0.22, which is a thinner tail than found through the Hill Double bootstrap, particularly for the left tail.
-
-
-```python
-fig, (ax1, ax2) = plt.subplots(1,2, figsize=(18,6))
-mu, sig, l, r = pnet.predicted_params().values.flatten()
-phatdist = ph.Phat(mu*10, sig*10, l, r)
-```
-    
-![png](imgs/output_18_0.png)
-    
-
-
-The Phat distribution is a better fit to the peak of the distribution while both the Gaussian and Student's T are better fits in the shoulders. The devil, of course, is in the tails.
-
-    
-![png](imgs/output_20_0.png)
-    
-
-
-Out in the left and right tails we see the Phat distribution is much better at capturing extreme events that have occured in the past 10 years.
-
-We can then feed this distribution, along with the results from the AR-GARCH fit, into the `Garchcaster`.
-
-
-```python
-n = 10000
-days = 252
-
-mu, sig, l, r = pnet.predicted_params().values
-phatdist = ph.Phat(mu*10, sig*10, l, r)
-fore = ph.Garchcaster(
-    garch=res,
-    iters=n,
-    periods=days,
-    order=(0,0,1,1),
-    dist=phatdist
-).forecast()
-```
-
-Calling the `forecast` method results in 10,000 separate AR-GARCH simulations, each spanning 252 trading days. A `GarchcastResults` container is returned, which includes some plotting methods for convenience.
-
-We can see the conditional variance of the resulting forecasts.
-
-
-```python
-fore.plot('var')
-plt.show()
-```
-
-
-    
-![png](imgs/output_24_0.png)
-    
-
-
-We can plot individual simulations.
-
-
-```python
-fore.plot('price', p=ko.Close[-1], n=4)
-plt.show()
-```
-
-
-    
-![png](imgs/output_26_0.png)
-    
-
-
-
-    
-![png](imgs/output_26_1.png)
-    
-
-
-
-    
-![png](imgs/output_26_2.png)
-    
-
-
-
-    
-![png](imgs/output_26_3.png)
-    
-
-
-And we can plot a histogram of the final price in each simulation.
-
-
-```python
-ax, P, bins = fore.plot('end_price', p=ko.Close[-1], ec='C0')
-plt.show()
-```
-
-
-    
-![png](imgs/output_28_0.png)
-    
-
