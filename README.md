@@ -5,7 +5,7 @@ The Phat distribution is a two-tailed, fully-continuous, well-defined asymmetric
 The **phat** package makes available several methods to fit a given time-series dataset to the parameters of the Phat distribution and produce a forecast with the results.
 
 ## Documentation ##
-[![Documentation Status: latest](https://img.shields.io/readthedocs/ipywidgets?logo=read-the-docs)](https://phat.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status: latest](https://img.shields.io/readthedocs/ipywidgets?logo=read-the-docs)](https://phat.readthedocs.io/en/latest)
 
 ## Installation ##
 
@@ -102,83 +102,9 @@ shape, mean, sig = 1/5, 0, 1
 x = np.linspace(-5+mean, 5+mean, 1000)
 phat_dist = ph.Phat(mean, sig, shape, shape)
 ```
-
-
-```python
-fig, ax1 = plt.subplots(1,1,figsize=(10,6))
-
-ax1.plot(x, phat_dist.pdf(x), alpha=.5)
-x_body = np.linspace(phat_dist.left.a, phat_dist.right.a, 100)
-x_left = np.linspace(x[0], phat_dist.left.a, 100)
-x_right = np.linspace(phat_dist.right.a, x[-1], 100)
-ax1.plot(x_body, phat_dist.pdf(x_body), c='C1', ls='--', label='Gaussian Body')
-ax1.plot(x_left, phat_dist.pdf(x_left), c='C2', ls='--', label='Left Paretian')
-ax1.plot(x_right, phat_dist.pdf(x_right), c='C4', ls='--', label='Right Paretian')
-
-ax1.axvline(
-    phat_dist.left.a, .825, .925, 
-    c='r', lw=1, label=r'Left Junction; $x = a_l$')
-ax1.axvline(phat_dist.right.a, .825, .925, c='r', lw=1, label=r'Right Junction; $x = a_r$')
-
-paramtxt = 'Body'
-paramtxt += '\n'
-paramtxt += r'$\mu, \sigma$ = ' + f'{phat_dist.mu:.0f}, {phat_dist.sig:.0f}'
-
-ax1.text(
-    .5, .5, paramtxt, ha='center',
-    transform=ax1.transAxes,
-    bbox=dict(boxstyle='round', ec='.8', fc='w')
-)
-
-paramtxt = r'Left Tail$_{}$'
-paramtxt += '\n'
-paramtxt += r'$\epsilon_{l}$ = ' + f'{phat_dist.left.xi:.2f}'
-paramtxt += '\n'
-paramtxt += r'$a_l$ = ' + f'{phat_dist.left.a:.2f}'
-paramtxt += '\n'
-paramtxt += r'$b_l$ = ' + f'{1 / phat_dist.left.b:.2f}'
-paramtxt += '\n'
-paramtxt += r'$\alpha_l$ = ' + f'{1 / phat_dist.left.xi:.2f}'
-paramtxt += '\n'
-paramtxt += r'$\gamma_l = $' + f'{phat_dist.right.gamma:.2f}'
-
-ax1.text(
-    .02,.3, paramtxt,
-    transform=ax1.transAxes,
-    bbox=dict(boxstyle='round', ec='.8', fc='w')
-)
-paramtxt = r'Right Tail$_{}$'
-paramtxt += '\n'
-paramtxt += r'$\epsilon_r$ = ' + f'{phat_dist.right.xi:.2f}'
-paramtxt += '\n'
-paramtxt += r'$a_r$ = ' + f'{phat_dist.right.a:.2f}'
-paramtxt += '\n'
-paramtxt += r'$b_r$ = ' + f'{1 / phat_dist.right.b:.2f}'
-paramtxt += '\n'
-paramtxt += r'$\alpha_r$ = ' + f'{1 / phat_dist.right.xi:.2f}'
-paramtxt += '\n'
-paramtxt += r'$\gamma_r = $' + f'{phat_dist.right.gamma:.2f}'
-
-ax1.text(
-    .98,.3, paramtxt, ha='right',
-    transform=ax1.transAxes,
-    bbox=dict(boxstyle='round', ec='.8', fc='w')
-)
-ax1.set_xlabel('x')
-ax1.set_ylabel('f(x)', loc='top', rotation='horizontal')
-
-ax1.legend()
-ax1.set_title('PDF - Phat')
-
-plt.show()
-```
-
-
     
-![png](output_7_0.png)
+![png](imgs/output_7_0.png)
     
-
-
 The Paretian tails are parameterized independently and so allow for asymmetry. Below we show two Phat distributions, one with symmetric tail index of alpha = 2 and the other with asymmetric tail indices, alpha_left = 2 and alpha_right = 20.
 
 
@@ -189,59 +115,9 @@ shape_l1, shape_r = 1/2, 1/2
 dist1 = ph.Phat(mean, sig, shape_l1, shape_r)
 shape_l2, shape_r = 1/2, 1/20
 dist2 = ph.Phat(mean, sig, shape_l2, shape_r,)
-
-fig, ax1 = plt.subplots(1,1,figsize=(10,6))
-
-ax1.plot(x, dist1.pdf(x), label='Fatter Right')
-ax1.plot(x, dist2.pdf(x), label='Thinner Right')
-
-paramtxt = r'Fatter Right$_{}$'
-paramtxt += '\n'
-paramtxt += r'$\epsilon_{l}$ = ' + f'{dist1.right.xi:.2f}'
-paramtxt += '\n'
-paramtxt += r'$a_l$ = ' + f'{dist1.right.a:.2f}'
-paramtxt += '\n'
-paramtxt += r'$b_l$ = ' + f'{1 / dist1.right.b:.2f}'
-paramtxt += '\n'
-paramtxt += r'$\alpha_l$ = ' + f'{1 / dist1.right.xi:.2f}'
-paramtxt += '\n'
-paramtxt += r'$\gamma_l = $' + f'{dist1.right.gamma:.2f}'
-
-ax1.text(
-    .02,.95, paramtxt, va='top',
-    transform=ax1.transAxes,
-    bbox=dict(boxstyle='round', ec='.8', fc='w')
-)
-paramtxt = r'Thinner Right$_{}$'
-paramtxt += '\n'
-paramtxt += r'$\epsilon_{l}$ = ' + f'{dist2.right.xi:.2f}'
-paramtxt += '\n'
-paramtxt += r'$a_l$ = ' + f'{dist2.right.a:.2f}'
-paramtxt += '\n'
-paramtxt += r'$b_l$ = ' + f'{1 / dist2.right.b:.2f}'
-paramtxt += '\n'
-paramtxt += r'$\alpha_l$ = ' + f'{1 / dist2.right.xi:.2f}'
-paramtxt += '\n'
-paramtxt += r'$\gamma_l = $' + f'{dist2.right.gamma:.2f}'
-
-ax1.text(
-    .02,.2, paramtxt, va='bottom',
-    transform=ax1.transAxes,
-    bbox=dict(boxstyle='round', ec='.8', fc='w')
-)
-ax1.set_xlabel('x')
-ax1.set_ylabel('f(x)', loc='top', rotation='horizontal')
-
-ax1.legend()
-
-ax1.set_title('PDF')
-
-plt.show()
 ```
 
-
-    
-![png](output_9_0.png)
+![png](imgs/output_9_0.png)
     
 
 
@@ -278,10 +154,6 @@ ko_ret = ko_ret[-252*20:]
 res = arch.arch_model(ko_ret, mean='Constant', vol='Garch', p=1, q=1).fit(disp='off')
 xi_left, xi_right = ph.two_tailed_hill_double_bootstrap(res.std_resid)
 ```
-
-
-      0%|          | 0/10 [00:00<?, ?it/s]
-
 
 
 ```python
@@ -358,93 +230,16 @@ Below we compare the fit of the Phat distribution to that of the Guassian and th
 fig, (ax1, ax2) = plt.subplots(1,2, figsize=(18,6))
 mu, sig, l, r = pnet.predicted_params().values.flatten()
 phatdist = ph.Phat(mu*10, sig*10, l, r)
-
-x = np.linspace(-6,6,1000)
-counts, bins, _ = ax1.hist(
-    data.raw.y*10, bins=500, density=True, fc='C1', ec='C1', alpha=.25,
-    label='AR-GARCH Residuals'
-)
-ax1.plot(x, phatdist.pdf(x), lw=3, c='C0', label=f'Phat ({mu:.2f},{sig:.2f},{l:.2f},{r:.2f})')
-
-norm_params = scist.norm.fit(data.raw.y*10)
-norm_label = ','.join([f'{p:.2f}' for p in norm_params])
-ax1.plot(x, scist.norm(*norm_params).pdf(x), c='C2', lw=3, label=r'$N$' f'({norm_label})')
-ax1.set_xlim(-6, 6)
-
-counts, bins, _ = ax2.hist(
-    data.raw.y*10, bins=500, density=True, fc='C1', ec='C1', alpha=.25,
-    label='AR-GARCH Residuals'    
-)
-ax2.plot(x, phatdist.pdf(x), lw=3, c='C0', label=f'Phat ({mu:.2f},{sig:.2f},{l:.2f},{r:.2f})')
-
-t_params = scist.t.fit(data.raw.y*10)
-t_label = ','.join([f'{p:.2f}' for name, p in zip([r'$v$', 'loc', 'scale'], t_params)])
-ax2.plot(x, scist.t(*t_params).pdf(x), c='C2', lw=3, label=f'T ({t_label})')
-ax2.set_xlim(-6, 6)
-
-ax1.legend()
-ax2.legend()
-
-plt.suptitle('Comparison of Fit: Phat v Guassian v T')
-
-plt.show()
 ```
-
-
     
-![png](output_18_0.png)
+![png](imgs/output_18_0.png)
     
 
 
 The Phat distribution is a better fit to the peak of the distribution while both the Gaussian and Student's T are better fits in the shoulders. The devil, of course, is in the tails.
 
-
-```python
-fig, (ax1, ax2) = plt.subplots(1,2, figsize=(18,6))
-mu, sig, l, r = pnet.predicted_params().values.flatten()
-phatdist = ph.Phat(mu*10, sig*10, l, r)
-
-x = np.linspace(-10,-2,1000)
-counts, bins, _ = ax1.hist(
-    data.raw.y*10, bins=500, density=True, fc='C1', ec='C1', alpha=.25,
-    label='AR-GARCH Residuals'
-)
-ax1.plot(x, phatdist.pdf(x), lw=3, c='C0', label=f'Phat ({mu:.2f},{sig:.2f},{l:.2f},{r:.2f})')
-
-norm_params = scist.norm.fit(data.raw.y*10)
-norm_label = ','.join([f'{p:.2f}' for p in norm_params])
-t_params = scist.t.fit(data.raw.y*10)
-t_label = ','.join([f'{p:.2f}' for name, p in zip([r'$v$', 'loc', 'scale'], t_params)])
-
-ax1.plot(x, scist.norm(*norm_params).pdf(x), c='C2', lw=3, label=r'$N$' f'({norm_label})')
-ax1.plot(x, scist.t(*t_params).pdf(x), c='C5', lw=3, label=f'T ({t_label})')
-ax1.set_xlim(-10,-2.5)
-ax1.set_ylim(0,.1)
-
-x = np.linspace(2,10,1000)
-counts, bins, _ = ax2.hist(
-    data.raw.y*10, bins=500, density=True, fc='C1', ec='C1', alpha=.25,
-    label='AR-GARCH Residuals'    
-)
-ax2.plot(x, phatdist.pdf(x), lw=3, c='C0', label=f'Phat ({mu:.2f},{sig:.2f},{l:.2f},{r:.2f})')
-ax2.plot(x, scist.norm(*norm_params).pdf(x), c='C2', lw=3, label=r'$N$' f'({norm_label})')
-ax2.plot(x, scist.t(*t_params).pdf(x), c='C5', lw=3, label=f'T ({t_label})')
-ax2.set_xlim(2.5,10)
-ax2.set_ylim(0,.1)
-
-ax1.legend()
-ax2.legend()
-ax1.set_title('Left Tail')
-ax2.set_title('Right Tail')
-
-plt.suptitle('Comparison of Tails: Phat v Guassian v T')
-
-plt.show()
-```
-
-
     
-![png](output_20_0.png)
+![png](imgs/output_20_0.png)
     
 
 
@@ -480,7 +275,7 @@ plt.show()
 
 
     
-![png](output_24_0.png)
+![png](imgs/output_24_0.png)
     
 
 
@@ -494,25 +289,25 @@ plt.show()
 
 
     
-![png](output_26_0.png)
+![png](imgs/output_26_0.png)
     
 
 
 
     
-![png](output_26_1.png)
+![png](imgs/output_26_1.png)
     
 
 
 
     
-![png](output_26_2.png)
+![png](imgs/output_26_2.png)
     
 
 
 
     
-![png](output_26_3.png)
+![png](imgs/output_26_3.png)
     
 
 
@@ -526,6 +321,6 @@ plt.show()
 
 
     
-![png](output_28_0.png)
+![png](imgs/output_28_0.png)
     
 
