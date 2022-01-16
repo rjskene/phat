@@ -22,7 +22,7 @@ copyright = u'2021 Ryan Skene. All rights reserved.'
 author = 'rskene'
 
 # The full version, including alpha/beta/rc tags
-release = '0.0.10'
+release = '0.0.11'
 
 # -- General configuration ---------------------------------------------------
 
