@@ -17,7 +17,7 @@ sys.path.append(os.path.abspath('./ext'))
 
 # -- Project information -----------------------------------------------------
 
-project = 'Phat Tails'
+project = 'phat-tails'
 copyright = u'2021 Ryan Skene. All rights reserved.'
 author = 'rskene'
 

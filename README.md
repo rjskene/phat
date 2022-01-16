@@ -53,7 +53,7 @@ Below is a complete rendering of the distribution, with breakdown among the comp
 
 Below we demonstrate the ability to generate asymmetric tails. We overlay two different Phat distributions, one with symmetric tail indices of alpha = 2 and the other with *asymmetric* tail indices, alpha = 2 and alpha_right = 20.
 
-We can see that the left tails are identical. In the right tails, the distributions appear to differ only modestly, however, [this difference leads to dramatically different effects](demo.ipynb#Compare-Fit-with-Gaussian-and-T).
+We can see that the left tails are identical. In the right tails, the distributions appear to differ only modestly, however, this difference leads to dramatically different effects.
 
 
 ```python
@@ -69,7 +69,7 @@ dist2 = ph.Phat(mean, sig, shape_l2, shape_r,)
     
 
 
-The `Phat` class has common methods such as `pdf`, `cdf`, `sf`, `ppf`. It can also calculate negative log-likelihood and first and second moments. Derivations are [found here](moments.ipynb).
+The `Phat` class has common methods such as `pdf`, `cdf`, `sf`, `ppf`. It can also calculate negative log-likelihood and first and second moments.
 
 
 ```python
@@ -195,13 +195,13 @@ phat_dist.std_rvs(20)
            -0.5693838 ,  0.50893717, -0.0747743 ,  0.5675617 ,  0.15844071])
 
 
-`Phat` has a `fit` method, which generates a [standard Maximum Likelihood Estimate (MLE)](mle_fit.ipynb), *although this is not the recommended approach to fitting this distribution*.
+`Phat` has a `fit` method, which generates a standard Maximum Likelihood Estimate, *although this is not the recommended approach to fitting this distribution*.
 
 In addition to the main distribution class, the package also provides:
 
-+ `ph.two_tailed_hill_double_bootstrap`: [a method for estimating both tail indices of a dataset simultaneously](dblbs.ipynb)
-+ `ph.PhatNet`: [a simple neural network that provides improved fit relative to MLE](nn_fit.ipynb), which includes a custom loss function called `PhatLoss`.
-+ `ph.Garchcaster`: [a class for generating time-series forecasts from ARMA and GARCH models that incorporates Phat random innovations](phatgarch.ipynb).
++ `ph.two_tailed_hill_double_bootstrap`: a method for estimating both tail indices of a dataset simultaneously
++ `ph.PhatNet`: a simple neural network that provides improved fit relative to MLE, which includes a custom loss function called `PhatLoss`.
++ `ph.Garchcaster`: a class for generating time-series forecasts from ARMA and GARCH models that incorporates Phat random innovations.
 
 ## Dependencies ##
 
