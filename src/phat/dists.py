@@ -682,50 +682,47 @@ class PhatFit(GenericLikelihoodModel):
         )
 
 class Phat:
-    """    
-    Pareto Hybrids with Asymmetric Tails
+    """
+    Twin-tailed distribution that combines a right-tailed CarBen with a left-tailed CarBen
 
-    Twin-tailed distribution combines:
-        1) right-tailed CarBen 
-        with 
-        2) left-tailed CarBen
+    Parameters:
+        mu:    
+            mean of the Gaussian body
+        sig:
+            standard deviation of the Gaussian body
+        xi_l:   
+            inverse of tail index of left-tailed generalized Pareto tail
+        xi_r:   
+            inverse of tail index of right-tailed generalized Pareto tail
+        p:
+            relative weights of the two CarBen hybrids. Default: [.5, .5]
+
+    Attributes:
+        left:               
+            left-tailed CarBenHybrid object
+        right:              
+            right-tailed CarBenHybrid object
+
+    **Details**
 
     Per Carreau and Bengio (2008).
     
     The properites of the body in both distributions are equivalent; thus, the mixture requires just
     four parameters: two parameters for the Gaussian body and the tail index for each of the two tails. 
     In all, the distribution has 8 parameters:
-        > Left tail: xi, a, b
-        > Right tail: xi, a, b
-        > Center: mu, sig
+
+    + Left tail: xi, a, b
+    + Right tail: xi, a, b
+    + Center: mu, sig
 
     As with any mixture model, this mix is the weighted average result of values from the two
     components. Default weights are 0.5 / 0.5.
 
     Weights could otherwise be estimated via machine learning, threshold analysis (for the tails),
     and gaussian statistics (for the body).
-
-    Parameters
-    -----------
-    xi_l:   inverse of tail index of left-tailed generalized Pareto tail
-    xi_r:   inverse of tail index of right-tailed generalized Pareto tail
-    mu:     mean of the Gaussian body
-    sig:    standard deviation of the Gaussian body
-    p:      relative weights of the two CarBen hybrids. Default: [.5, .5]
-
-    Attributes
-    -----------
-    left:               left-tailed CarBenHybrid object
-    right:              right-tailed CarBenHybrid object
-    args:               list of values of 8 parameters of Phat distribution
-    params:             name-value pairs of 8 parameters of Phat distribution
-    learnable_params:   name-value pairs of 4 given parameters of Phat distribution
-
-    Methods
-    --------
-        > handle helper and common distribution functions that are agnostic to tail-direction
     """
     PARAM_NAMES = ['mu', 'sig', 'xi_l',  'xi_r', 'a_l', 'a_r', 'b_l', 'b_r']
+
     def __init__(
         self, mu:float, sig:float, xi_l:float, xi_r:float, p:Iterable=None
         ) -> None:
@@ -744,75 +741,51 @@ class Phat:
     
     @property
     def args(self) -> tuple:
+        """
+        Tuple of the distribution parameters
+        """
         return self.mu, self.sig, self.xi_l, self.xi_r, self.left.a, \
             self.right.a, self.left.b, self.right.b
 
     @property
-    def params(self) -> dict:        
+    def params(self) -> dict:
+        """
+        Dictionary of the distribution parameters
+        """      
         return {name: arg for name, arg in zip(self.PARAM_NAMES, self.args)}
 
     @property
     def learnable_params(self) -> List[float]:
         """
-        Params tuned by machine learning approach
+        List of distribution parameters that can be tuned by machine learning approach
         """
         return [self.params[name] for name in self.PARAM_NAMES[:4]]
 
     @argsetter('x')
     @dotweight
     def pdf(self, x:XTYPE=None) -> np.ndarray:
-        """
-        Parameters  
-        ----------
-        x:      float, m x n iterable of floats of random variable samples
-
-        Return
-        -------
-        float or iterable of floats returning the likelihood of occurence of each sample
-        """        
         return stacker(x)((self.left.pdf(x), self.right.pdf(x)))
     
     @argsetter('x')
     @dotweight    
     def cdf(self, x:XTYPE=None) -> np.ndarray:
-        """
-        Parameters
-        ----------
-        x:      float, m x n iterable of floats of random variable samples
-
-        Return
-        -------
-        float or iterable of floats returning cumulative probability of each sample
-        """        
         return stacker(x)((self.left.cdf(x), self.right.cdf(x)))
     
     @argsetter('x')
     def sf(self, x:XTYPE=None) -> np.ndarray:
-        """
-        Parameters
-        ----------
-        x:      float, m x n iterable of floats of random variable samples
-
-        Return
-        -------
-        float or iterable of floats returning survival probability of each sample
-        """        
         return 1 - self.cdf(x)
     
     @dotweight
     def ppf(self, q:XTYPE=None) -> np.ndarray:
         """
-        Parameters
-        ----------
-        q:      float, iterable of floats between [0, 1]
-
-        Return
-        -------
-        float or iterable of floats returning x values corresponding to the given quantiles
+        Parameters:
+            q: float, iterable of floats 
+                Between [0, 1]
         """        
         return stacker(q)((self.left.ppf(q), self.right.ppf(q)))
 
     def loglike(self, x=None):
+        "Loglikelihood"
         return np.log(self.pdf(x))
 
     @argsetter('x')
@@ -826,16 +799,12 @@ class Phat:
         """
         Generates random draws
 
+        **Process**
+
         1. Draws randomly from [0,1] uniform distribution
         2. Calls quantile function for each draw
 
-        Mimics scipy process:
-        https://github.com/scipy/scipy/blob/28e4811d48c99b7c68e41992eda5cff859c1fa2b/scipy/stats/_distn_infrastructure.py#L1032
-
-        Params
-        -------
-        size:   int or iterable of ints providing dimensions of return array
-        seed:   int; initialize with specific random state for replication
+        Mimics `scipy process <https://github.com/scipy/scipy/blob/28e4811d48c99b7c68e41992eda5cff859c1fa2b/scipy/stats/_distn_infrastructure.py#L1032>`_.
         """
         random_state = check_random_state(seed)
         U = random_state.uniform(size=size)
@@ -855,10 +824,10 @@ class Phat:
     def var(self) -> float:
         return np.array([self.left.var(), self.right.var()])
 
-    def std(self):
+    def std(self) -> float:
         return np.sqrt(self.var())
 
-    def std_rvs(self, *args, **kwargs):
+    def std_rvs(self, *args, **kwargs) -> XTYPE:
         """
         Generates random variables standardized by dividing by the standard deviation
 
@@ -872,8 +841,7 @@ class Phat:
         Generates standard log-likelihood fit to Phat distribution
 
         Returns:
-        --------
-        PhatFit object, which is a light wrapper for statsmodels GenericLogLikelihood
+            PhatFit
         """
         exog = sm.add_constant(np.zeros_like(values), prepend=True)
         phatfit = PhatFit(values, exog, xi_l, xi_r)

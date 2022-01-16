@@ -1,20 +1,22 @@
 """
 Custom functionality for generating ARMA-GARCH time-series forecasts.
 """
+from __future__ import annotations
 
-from typing import Iterable, Union, Tuple
+from typing import Iterable, Union, Tuple, TYPE_CHECKING
 import warnings
 import numpy as np
 import pandas as pd
 import scipy
 import matplotlib.pyplot as plt
 
-import pmdarima
-import arch
 import numba as nb
 
 from phat.utils import argsetter, arrayarize, PriceSim
 from phat.dists import Phat
+
+import pmdarima
+import arch
 
 ALLOWED_DISTS = Union[Phat, scipy.stats._distn_infrastructure.rv_frozen]
 
@@ -408,33 +410,35 @@ class GarchcastResults:
 
 class Garchcaster:
     """
-    Class for forecasting time series via ARMA-GARCH process.
+Class for forecasting time series via ARMA-GARCH process.
 
-    Instances of a `pmdarima`-based ARIMA object and/or an ARCHModelResult from the 
-    `arch` package can be provided directly. Alternatively, the user can provide all
-    residuals, standardized residuals, conditional volatilities, the parameters for 
-    the ARMA-GARCH process, and the order.
+Instances of a `pmdarima`-based ARIMA object and/or an ARCHModelResult from the 
+`arch` package can be provided directly. Alternatively, the user can provide all
+residuals, standardized residuals, conditional volatilities, the parameters for 
+the ARMA-GARCH process, and the order.
 
-    Params
-    -------
-    arma:           instance of pmdarima ARIMA class OR iterable of floats; 
-                    Either provide a pmdarima instance or the params derived from any arima process.
-                    If None, will search for AR process in `garch`, otherwise assumes ConstantMean.
-    garch:          instance of arch ARCHModelResult class OR iterable of floats;
-                    either provide an ARCHModelResult instance or the params derived from any garch process
-
-    y:              float or iterable of floats; 
-                    iters x periods standardized residuals after filtering an ARMA-GARCH. Only required if
-                    garch is not ARCHModelResult type.
-    vols:           float or iterable of floats; 
-                    iters x periods conditional volatilities resulting from an ARMA-GARCH process. Only required if 
-                    garch is not ARCHModelResult type.
-    resids:         float or iterable of floats; iters x periods residuals after filtering an ARMA-GARCH.
-                    Only required if garch is not ARCHModelResult type.
-    iters:          int; number of iterations of forecast
-    periods:        int; number of periods in each iteration of the forecast
-    dist:           Phat or scipy rv_frozen class; distribution used to generate residuals
-    use_backcast:   bool; use procedure to smooth values. See https://arch.readthedocs.io/en/latest/univariate/generated/generated/arch.univariate.GARCH.backcast.html
+Params:
+    arma: instance of pmdarima ARIMA class OR iterable of floats 
+        Either provide a pmdarima instance or the params derived from any arima process.
+        If None, will search for AR process in `garch`, otherwise assumes ConstantMean.
+    garch: instance of arch ARCHModelResult class OR iterable of floats
+        either provide an ARCHModelResult instance or the params derived from any garch process
+    y:  float or iterable of floats 
+        iters x periods standardized residuals after filtering an ARMA-GARCH. Only required if
+        garch is not ARCHModelResult type.
+    vols: float or iterable of floats
+        iters x periods conditional volatilities resulting from an ARMA-GARCH process. Only required if 
+        garch is not ARCHModelResult type.
+    resids: float or iterable of floats
+        iters x periods residuals after filtering an ARMA-GARCH. Only required if garch is not ARCHModelResult type.
+    iters: int 
+        number of iterations of forecast
+    periods: int 
+        number of periods in each iteration of the forecast
+    dist: Phat or scipy rv_frozen class 
+        distribution used to generate residuals
+    use_backcast: bool 
+        use procedure to smooth values. See `here <https://arch.readthedocs.io/en/latest/univariate/generated/generated/arch.univariate.GARCH.backcast.html>`_.
     """
     GARCH_HAS_MEAN_PROCESS = False
 
@@ -641,17 +645,17 @@ class Garchcaster:
         """
         User-facing interface with forecast generator
 
-        Params
-        -------
-        iters:          int; number of iterations of forecast
-        periods:        int; number of periods in each iteration of the forecast
-        dist:           Phat or scipy rv_frozen class; distribution used to generate residuals
-        innovs:         iters x periods np.ndarray of garch residuals
-        seed:           int; random state for innovation determination if `innovs` is not provided
-
-        Return
-        -------
-        GarchcastResults
+        Params:
+            iters: int
+                number of iterations of forecast
+            periods: int
+                number of periods in each iteration of the forecast
+            dist: Phat or scipy rv_frozen class
+                distribution used to generate residuals
+            innovs: np.ndarray
+                iters x periods of garch residuals
+            seed: int
+                random state for innovation determination if `innovs` is not provided
         """
         if innovs is None:
             innovs = self._sample_innovs(iters, periods, dist=dist, seed=seed)

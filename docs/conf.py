@@ -22,7 +22,7 @@ copyright = u'2021 Ryan Skene. All rights reserved.'
 author = 'rskene'
 
 # The full version, including alpha/beta/rc tags
-release = '0.0.6'
+release = '0.0.10'
 
 # -- General configuration ---------------------------------------------------
 
@@ -33,6 +33,8 @@ extensions = [
     'custom_nbsphinx',
     'sphinx.ext.mathjax',
     'IPython.sphinxext.ipython_console_highlighting',
+    'sphinx.ext.autodoc',
+    'sphinx.ext.autosummary',
 ]
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -73,4 +75,6 @@ html_static_path = ['_static']
 html_css_files = [
     'css/custom.css',
 ]
-master_doc = 'index'
+html_additional_pages = {'index': 'intro.html'}
+
+master_doc = 'contents'

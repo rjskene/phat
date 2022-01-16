@@ -10,6 +10,7 @@ Pareto Hybrids with Asymmetric Tails
    :maxdepth: 3
    
    notebooks/intro
+   notebooks/demo
 
 .. toctree::
    :caption: Define
@@ -39,4 +40,5 @@ Pareto Hybrids with Asymmetric Tails
    :caption: Misc
    :maxdepth: 3
 
-   notebooks/references      
+   notebooks/references
+   api
