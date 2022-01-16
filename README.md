@@ -32,10 +32,7 @@ $ pip install phat-tails
 Also see requirements and compatibility specifications for [Tensorflow](https://www.tensorflow.org/install) and [Numba](https://numba.readthedocs.io/en/stable/user/installing.html)
 
 ### Suggested ###
-+ [arch](https://arch.readthedocs.io/en/latest/): *the* python package for fitting and forecasting GARCH models
-+ [pmdarima](http://alkaline-ml.com/pmdarima/): recommend for fitting ARMA models (`arch` currently does not support MA)
-+ [statsmodels](https://www.statsmodels.org/): wrapped by both `arch` and `pmdarima` and used in the `fit` method of the `Phat` model.
-+ [tensorboard](https://www.tensorflow.org/tensorboard/get_started): monitoring tool for tensorflow
++ [tensorboard](https://www.tensorflow.org/tensorboard/get_started): monitoring dashboard for tensorflow
 + [yfinance](https://github.com/ranaroussi/yfinance): for downloading historical price data
 
 ## Also Check Out ##
