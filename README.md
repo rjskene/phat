@@ -31,12 +31,6 @@ All pertinent classes and functions are imported via the module `phat`.
 
 
 ```python
-%load_ext autoreload
-%autoreload 2
-```
-
-
-```python
 import phat as ph
 ```
 
@@ -71,7 +65,7 @@ dist2 = ph.Phat(mean, sig, shape_l2, shape_r,)
 ```
 
     
-![png](output_12_0.png)
+![png](imgs/output_12_0.png)
     
 
 
@@ -199,43 +193,6 @@ phat_dist.std_rvs(20)
             0.16728373, -0.1375456 ,  0.36916545,  3.5360414 , -0.62137662,
            -0.37860114,  1.14978021, -1.04659032, -0.12308385,  0.62170651,
            -0.5693838 ,  0.50893717, -0.0747743 ,  0.5675617 ,  0.15844071])
-
-
-
-Importantly, Phat captures the undefined moments that result when alpha < 2.
-
-
-```python
-shape_l, shape_r, mean, sig = 1, 1, 0, 1
-phat_dist = ph.Phat(mean, sig, shape_l, shape_r)
-```
-
-
-```python
-phat_dist.mean()
-```
-
-    /Users/spindicate/Documents/programming/investing/analysis/options/phat/src/phat/utils.py:75: RuntimeWarning: invalid value encountered in matmul
-      return (self.p @ stack)
-
-
-
-
-
-    nan
-
-
-
-
-```python
-phat_dist.var()
-```
-
-
-
-
-    nan
-
 
 
 `Phat` has a `fit` method, which generates a [standard Maximum Likelihood Estimate (MLE)](mle_fit.ipynb), *although this is not the recommended approach to fitting this distribution*.
