@@ -84,12 +84,6 @@ Below, we show a Phat distribution with a standard normal body and symmetric Par
 
 
 ```python
-%load_ext autoreload
-%autoreload 2
-```
-
-
-```python
 import numpy as np
 import scipy.stats as scist
 import matplotlib.pyplot as plt
@@ -153,10 +147,7 @@ ko_ret = ko_ret[-252*20:]
 ```python
 res = arch.arch_model(ko_ret, mean='Constant', vol='Garch', p=1, q=1).fit(disp='off')
 xi_left, xi_right = ph.two_tailed_hill_double_bootstrap(res.std_resid)
-```
 
-
-```python
 data = ph.DataSplit(res.std_resid[2:]/10)
 pnet = ph.PhatNet(neurons=1)
 pnet.compile(
@@ -165,8 +156,6 @@ pnet.compile(
 )
 history = pnet.fit(data.train, validation_data=data.test, epochs=100, verbose=0)
 ```
-
-    Epoch 00047: early stopping
 
 
 The training process above results in the following estimated parameters for the standardized GARCH residuals.
@@ -180,19 +169,6 @@ pnet.predicted_params()
 
 
 <div>
-<style scoped>
-    .dataframe tbody tr th:only-of-type {
-        vertical-align: middle;
-    }
-
-    .dataframe tbody tr th {
-        vertical-align: top;
-    }
-
-    .dataframe thead th {
-        text-align: right;
-    }
-</style>
 <table border="1" class="dataframe">
   <thead>
     <tr style="text-align: right;">
