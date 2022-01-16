@@ -2,7 +2,7 @@
 
 The **Phat** distribution is an attempt to address the issues of fat tails in two-tailed data. It is a two-tailed, fully-continuous, well-defined asymmetric power law probability distribution. 
 
-It is a mixture model of two Pareto hybrid distributions, as described in [2009 by Julie Carreau and Yoshua Bengio](https://www.researchgate.net/publication/226293435_A_hybrid_Pareto_model_for_asymmetric_fat-tailed_data_The_univariate_case) (and dubbed by us as the "Carben" distribution), with:
+It is a mixture model of two Pareto hybrid distributions, as described in [2009 by Julie Carreau and Yoshua Bengio](https://www.researchgate.net/publication/226293435_A_hybrid_Pareto_model_for_asymmetric_fat-tailed_data_The_univariate_case), with:
 
 + Gaussian body 
 + distinct Pareto power laws in either tail.
