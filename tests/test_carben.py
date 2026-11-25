@@ -28,7 +28,7 @@ class TestGroup:
         return ph.CarBenHybrid(*l_params)
 
     def is_right(self, cb):
-	    return isinstance(cb, ph.dists.CarBenRight)
+        return isinstance(cb, ph.dists.CarBenRight)
 
     def test_correct_params(self, cb, r_params, l_params):
         params = r_params if self.is_right(cb) else l_params
@@ -51,23 +51,23 @@ class TestGroup:
         if self.is_right(cb):
             assert np.isclose(cb.sf(cb.a), 1 / cb.gamma)
         else:
-            assert cb.cdf(cb.a) == 1 / cb.gamma
+            assert np.isclose(cb.cdf(cb.a), 1 / cb.gamma)
 
     def test_cdf(self, cb):
         if self.is_right(cb):
             assert np.isclose(cb.cdf(cb.a), 1 - 1 / cb.gamma)
         else:
             assert np.isclose(cb.cdf(cb.a), 1 / cb.gamma)
-            assert cb.cdf(cb.a) + (cb.body.cdf(np.inf) - cb.body.cdf(cb.a)) / cb.gamma == 1
-            assert (1/cb.gamma) + (cb.body.cdf(np.inf) - cb.body.cdf(cb.a)) / cb.gamma == 1
-            assert 1 + (cb.body.cdf(np.inf) - cb.body.cdf(cb.a)) == cb.gamma
+            assert np.isclose(cb.cdf(cb.a) + (cb.body.cdf(np.inf) - cb.body.cdf(cb.a)) / cb.gamma, 1)
+            assert np.isclose((1/cb.gamma) + (cb.body.cdf(np.inf) - cb.body.cdf(cb.a)) / cb.gamma, 1)
+            assert np.isclose(1 + (cb.body.cdf(np.inf) - cb.body.cdf(cb.a)), cb.gamma)
             x = 3
-            assert np.isclose((1 - cb.body.cdf(cb.a) + cb.body.cdf(x)) / cb.gamma, cb.cdf(x)[0])
+            assert np.isclose((1 - cb.body.cdf(cb.a) + cb.body.cdf(x)) / cb.gamma, cb.cdf(x))
             assert np.isclose(cb.body.cdf(cb.a), cb.gamma*(2*cb.qjunc - 1))
 
     def test_sf(self, cb):
         vals = [-1,0.02,2.5]
-        assert np.all(cb.sf(vals) == 1 - cb.cdf(vals))
+        assert np.allclose(cb.sf(vals), 1 - cb.cdf(vals))
 
     def test_rvs(self, cb):
         size = 1
@@ -87,6 +87,13 @@ class TestGroup:
         else:
             assert cb.qjunc == 1/cb.gamma
             assert np.isclose(cb.qjunc, 0.5974278891760335)
+
+    def test_construct_from_junction(self, cb):
+        # Before the fix `_calc_b_w_a` returned (a - mu*xi)/sqrt(W) instead of (1+xi)|a-mu|/W.
+        other = type(cb)(cb.xi, cb.mu, a=cb.a)
+        assert np.isclose(other.sig, cb.sig)
+        assert np.isclose(other.b, cb.b)
+        assert np.isclose(other.pdf(cb.a + 1), cb.pdf(cb.a + 1))
 
     def test_ppf(self, cb):
         assert np.isclose(cb.ppf(cb.qjunc), cb.a)

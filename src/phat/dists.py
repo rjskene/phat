@@ -118,444 +118,394 @@ class DBLPareto(DBLFat):
     dist = scist.pareto
 
 ############# Main Phat-related Distributions ################
+
+def _as_float_array(x) -> np.ndarray:
+    return np.asarray(x, dtype=float)
+
+
+def _scalar_or_array(out):
+    """Return a NumPy scalar for 0-d results, otherwise the array (SciPy convention)."""
+    out = np.asarray(out)
+    return out[()] if out.ndim == 0 else out
+
+
+def _rng(random_state=None) -> np.random.Generator:
+    """Coerce ``None``, an integer seed, a ``Generator`` or a legacy ``RandomState``."""
+    if isinstance(random_state, (np.random.Generator, np.random.RandomState)):
+        return random_state
+    return np.random.default_rng(random_state)
+
+
 class CarBenBase:
     """
-    Base Class of CarBen Hybrid distribution. Generalizes code used in both Left and Right tailed versions.
+    Base class of the CarBen hybrid distribution (Carreau and Bengio, 2007/2009),
+    a one-sided splice of a Gaussian and a generalized Pareto distribution.
+    Generalizes code used in both the left- and right-tailed versions.
 
-    CarBen is a one-tailed assymetric hybrid of Gaussian and generalized Pareto distributions. Derivation of 
-    the distribution found in Carreau and Bengio (2008):
-    https://www.researchgate.net/publication/226293435_A_hybrid_Pareto_model_for_asymmetric_fat-tailed_data_The_univariate_case#pf6
+    Three free parameters:
 
-    Takes 3 free parameters:
-        > shape (xi) of generalized Pareto (inverse of the tail index)
-        > mean (mu), standard deviation (sig) of the Gaussian distribution
-    
-    Remaining 2 Pareto parameters are found via equalities
-        > b, which is the scale, as function of sig and xi (utilizing a Lambert W)
-        > a, which is the location, can then be found either via a) scale OR b) via the Lambert W. the latter is used
-    
-    Optional parameters:
-        > instead of `sig`, user can provide `a`, which is the location of the generalized Pareto
+    * ``xi``:  shape of the generalized Pareto tail (``xi >= 0`` for a heavy tail)
+    * ``mu``:  location of the Gaussian body
+    * ``sig``: scale of the Gaussian body. **Not** the standard deviation of the
+      hybrid; see :meth:`std`.
 
-    Parameters
-    -----------
-    xi:     inverse of tail index of generalized Pareto tail
-    mu:     mean of the Gaussian body
-    sig:    standard deviation of the Gaussian body
+    The two remaining GPD parameters are fixed by continuity of the density and
+    its first derivative at the junction ``a``. With ``z = (1 + xi)^2 / (2 pi)``,
+    ``s = sqrt(W(z))`` (``W`` the Lambert W function):
+
+    * junction          ``a = mu + s * sig``       (right tail; ``mu - s * sig`` left)
+    * GPD scale         ``b = sig * (1 + xi) / s``
+    * normaliser        ``gamma = 1 + Phi(s)``
+
+    so the Gaussian part carries mass ``Phi(s) / gamma`` and the GPD tail
+    ``1 / gamma``. Instead of ``sig`` the junction ``a`` may be supplied.
 
     Attributes
-    -----------
-    body:   scipy gaussian distribution with arguments mean/loc=mu and scale=sig
-    tail:   scipy generalized pareto with arguments shape=xi, loc=a, scale=b
-    gamma:  the proportionate factor whose inverse ensures pdf of CarBen integrates to 1
-
-    Methods
-    --------
-        > handle helper and common distribution functions that are agnostic to tail-direction
+    ----------
+    body:   frozen ``scipy.stats.norm(mu, sig)``
+    tail:   frozen ``scipy.stats.genpareto`` (for the left tail: of the reflected variable)
+    gamma:  normaliser; the density is (Gaussian or GPD) / gamma
+    s:      junction distance from ``mu`` in units of ``sig``
     """
 
-    def __init__(self, 
-        xi:float,
-        mu:float,
-        sig:float=None, 
-        a:float=None
+    def __init__(self,
+        xi: float,
+        mu: float,
+        sig: float = None,
+        a: float = None,
         ) -> None:
-        """
-        Calcs sig, a, b paramters based on arguments provided
-
-        Assigns body distribution with given arguments. The tail distribution is assigned in child classes.
-        """
+        xi = float(xi)
+        if xi <= -1:
+            raise ValueError('`xi` must be greater than -1')
         self.xi = xi
-        self.mu = mu
+        self.mu = float(mu)
 
         provided = (sig is None, a is None)
         if all(provided) or not any(provided):
             raise ValueError('Please provide only one of `sig` or `a`')
         elif sig is not None:
+            sig = float(sig)
+            if sig <= 0:
+                raise ValueError('`sig` must be positive')
             self.sig = sig
             self._given = 'sig'
-            self.b = self._calc_b_w_sig()
             self.a = self._calc_a()
-        elif a is not None:
-            self.a = a
+        else:
+            self.a = float(a)
             self._given = 'a'
-            self.b = self._calc_b_w_a()
             self.sig = self._calc_sig()
+            if not self.sig > 0:
+                raise ValueError('`a` must lie on the tail side of `mu`')
+        self.b = self._calc_b_w_sig()
 
         self.body = scist.norm(self.mu, self.sig)
-        
-    @property
-    def tail(self) -> str:
-        """
-        Tail distribution of type scipy.genpareto.
 
-        `_tail` is assigned in CarbenLeft or CarbenRight child class
-        """
+    # ---- fixed quantities -------------------------------------------------
+    @property
+    def tail(self):
+        """Frozen ``scipy.stats.genpareto``; assigned in the Left/Right subclass."""
         if hasattr(self, '_tail'):
             return self._tail
-        else:
-            raise NotImplementedError
+        raise NotImplementedError
+
+    def z(self) -> float:
+        """``(1 + xi)^2 / (2 pi)``, the argument of the Lambert W function."""
+        return (1 + self.xi) ** 2 / (2 * np.pi)
+
+    def W_z(self) -> float:
+        """Principal branch of the Lambert W function at :meth:`z` (real for ``xi > -1``)."""
+        val = spec.lambertw(self.z())
+        return float(val.real)
+
+    @property
+    def s(self) -> float:
+        """Junction distance from ``mu`` in units of ``sig``: ``sqrt(W(z))``."""
+        return float(np.sqrt(self.W_z()))
 
     @property
     def gamma(self) -> float:
-        """
-        defined in Carreau and Bengio (2008)
+        """Normaliser ``1 + Phi(s)``; equals ``1 + (1 + erf(s / sqrt 2)) / 2``."""
+        return 1.0 + float(scist.norm.cdf(self.s))
 
-        proportionate factor whose inverse scales the CarBen so the density integrates to 1
-        """
-        val = np.sqrt(self.W_z() / 2)
-        return 1 + .5*(1 + spec.erf(val))
+    @property
+    def body_mass(self) -> float:
+        """Probability carried by the Gaussian part, ``Phi(s) / gamma``."""
+        return float(scist.norm.cdf(self.s)) / self.gamma
 
-    def z(self) -> float:
-        """
-        in Carreau and Bengio (2008), z defined as:
-
-            (1 + xi)**2 / 2*pi
-        """
-        num = (1 + self.xi)**2
-        denom = 2*np.pi
-        return  num / denom        
-
-    def W_z(self) -> float:
-        """
-        in Carreau and Bengio (2008), W(z) can be calculated directly as:
-            
-            sig**2 * (1 + xi)**2 / b**2
-
-        b is not a free parameter, so W(z) must be calculated via
-        the Lambert function, which is defined only in free parameters.
-        """
-
-        val = spec.lambertw(self.z())
-        assert (val.imag == 0).all(), val.imag
-
-        return val.real
+    @property
+    def tail_mass(self) -> float:
+        """Probability carried by the GPD part, ``1 / gamma``."""
+        return 1.0 / self.gamma
 
     def _calc_b_w_sig(self) -> float:
-        """
-        see Equation 7 in Carreau and Bengio (2008)
-        """
-        num = self.sig*(1 + self.xi)
-        denom = np.sqrt(self.W_z())
-        
-        return num / denom
+        """Equation 7 in Carreau and Bengio: ``b = sig (1 + xi) / sqrt(W(z))``."""
+        return self.sig * (1 + self.xi) / self.s
 
     def _calc_b_w_a(self) -> float:
-        """
-        found by substituion of Equation 7 in Carreau and Bengio (2008)
+        """``b`` from the junction: ``sig = |a - mu| / s`` so ``b = (1 + xi) |a - mu| / W(z)``."""
+        return (1 + self.xi) * abs(self.a - self.mu) / self.W_z()
 
-        sig = (a - mu)/W(z)
-        b = ((1+xi)(a - mu)/(W(z)sqrt(W(z)))
-        b = a - mu + xi*a - xi*mu
-        """
-        num = self.a - self.mu*self.xi
-        denom = np.sqrt(self.W_z())
-        return num / denom
+    # ---- generic helpers --------------------------------------------------
+    def _zscore(self, x: np.ndarray) -> np.ndarray:
+        return (x - self.mu) / self.sig
 
-    @argsetter('x')
-    def sf(self, x:XTYPE=None) -> np.ndarray:
+    def std(self) -> float:
+        return float(np.sqrt(self.var()))
+
+    def stats(self):
+        """``(mean, var)``"""
+        return self.mean(), self.var()
+
+    def rvs(self,
+        size: Union[int, Iterable[int]] = None,
+        random_state=None,
+        *,
+        seed=None,
+        ) -> XTYPE:
         """
-        Survival function, P(X < x)
+        Random draws by inversion of the CDF (exact for a single component).
 
         Parameters
         ----------
-        x:      float, m x n iterable of floats of random variable samples
-
-        Return
-        -------
-        float or iterable of floats returning survival probability of each sample
+        size:           int or tuple of ints; ``None`` returns a scalar
+        random_state:   ``None``, int seed, ``numpy.random.Generator`` or ``RandomState``
+        seed:           deprecated alias of ``random_state``
         """
-        return 1 - self.cdf(x)
-    
-    def rvs(self, 
-        size:Union[int, Iterable[Sequence[int]]]=None, 
-        seed:int=None) -> XTYPE:
-        """
-        Generates random draws
+        rng = _rng(random_state if random_state is not None else seed)
+        return self.ppf(rng.random(size))
 
-        1. Draws randomly from [0,1] uniform distribution
-        2. Calls quantile function for each draw
-
-        Mimics scipy process:
-        https://github.com/scipy/scipy/blob/28e4811d48c99b7c68e41992eda5cff859c1fa2b/scipy/stats/_distn_infrastructure.py#L1032
-
-        Params
-        -------
-        size:   int or iterable of ints providing dimensions of return array
-        seed:   int; initialize with specific random state for replication
-        """
-        random_state = check_random_state(seed)
-
-        U = random_state.uniform(size=size)
-        if size is None:
-            U = np.array(U, ndmin=1)
-            Y = self.ppf(U)[0]
-        else:
-            Y = self.ppf(U)
-        return Y
 
 class CarBenRight(CarBenBase):
     """
-    Right-tailed CarBen distribution.
-
-    Assigns `_tail`, handler methods, and common distribution functions that 
-    are specific to the tail direction.
+    Right-tailed CarBen hybrid: Gaussian for ``x <= a``, generalized Pareto for ``x > a``.
     """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._tail = scist.genpareto(self.xi, loc=self.a, scale=self.b)
-    
+        self._phi_s = float(scist.norm.cdf(self.s))
+        self._log_gamma = float(np.log(self.gamma))
+
     def _calc_a(self) -> float:
-        """
-        see Equation 8 in Carreau and Bengio (2008)        
-        """
-        return self.mu + self.sig*np.sqrt(self.W_z())
+        """Equation 8 in Carreau and Bengio: ``a = mu + sig sqrt(W(z))``."""
+        return self.mu + self.sig * self.s
 
     def _calc_sig(self) -> float:
-        """
-        rearrangement of Equation 8 in Carreau and Bengio (2008)        
-        """
-        return (self.a - self.mu) / np.sqrt(self.W_z())
+        return (self.a - self.mu) / self.s
 
-    @argsetter('x')
-    def pdf(self, x:XTYPE=None) -> np.ndarray:
-        """
-        Probability density function
+    # ---- distribution functions ---------------------------------------------
+    def pdf(self, x: XTYPE) -> np.ndarray:
+        x = _as_float_array(x)
+        out = np.where(x > self.a, self.tail.pdf(x), self.body.pdf(x)) / self.gamma
+        return _scalar_or_array(out)
 
-        See Carreau and Bengio (2008) for derivation
+    def logpdf(self, x: XTYPE) -> np.ndarray:
+        x = _as_float_array(x)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            out = np.where(x > self.a, self.tail.logpdf(x), self.body.logpdf(x)) - self._log_gamma
+        return _scalar_or_array(out)
 
-        Parameters
-        ----------
-        x:      float, m x n iterable of floats of random variable samples
+    def cdf(self, x: XTYPE) -> np.ndarray:
+        x = _as_float_array(x)
+        out = np.where(x > self.a, self._phi_s + self.tail.cdf(x), self.body.cdf(x)) / self.gamma
+        return _scalar_or_array(out)
 
-        Return
-        -------
-        float or iterable of floats returning likelihood of occurence of each sample
-        """        
-        pdf = np.where(
-            x > self.a,
-            self.tail.pdf(x),
-            self.body.pdf(x)
-        )
-        return pdf / self.gamma
-    
-    @argsetter('x')
-    def cdf(self, x:XTYPE=None) -> np.ndarray:
-        """
-        Cumulative Distribtion Function, P(X<x)
+    def sf(self, x: XTYPE) -> np.ndarray:
+        """Survival function ``P(X > x)``, computed without ``1 - cdf`` so the far tail keeps its precision."""
+        x = _as_float_array(x)
+        out = np.where(x > self.a, self.tail.sf(x), 1.0 + self._phi_s - self.body.cdf(x)) / self.gamma
+        return _scalar_or_array(out)
 
-        See Docs for derivation
+    def logcdf(self, x: XTYPE) -> np.ndarray:
+        x = _as_float_array(x)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            out = np.where(
+                x > self.a,
+                np.log(self._phi_s + self.tail.cdf(x)),
+                self.body.logcdf(x),
+            ) - self._log_gamma
+        return _scalar_or_array(out)
 
-        Parameters
-        ----------
-        x:      float, m x n iterable of floats of random variable samples
-
-        Return
-        -------
-        float or iterable of floats returning cumulative probability of each sample
-        """
-        cdf = np.where(
-            x > self.a,
-            self.body.cdf(self.a) + self.tail.cdf(x),
-            self.body.cdf(x)
-        )
-        return cdf / self.gamma 
+    def logsf(self, x: XTYPE) -> np.ndarray:
+        x = _as_float_array(x)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            out = np.where(
+                x > self.a,
+                self.tail.logsf(x),
+                np.log1p(self._phi_s - self.body.cdf(x)),
+            ) - self._log_gamma
+        return _scalar_or_array(out)
 
     @property
     def qjunc(self) -> float:
-        """
-        Quantile of junction point, a, b/w body and tail distribution
-        
-        See Docs for derivation
-        """
+        """CDF at the junction ``a``: ``1 - 1 / gamma``."""
         return 1 - 1 / self.gamma
 
-    def ppf(self, q:XTYPE) -> np.ndarray:
-        """
-        Quantile function, analogous to `ppf` method in `scipy`.
+    def ppf(self, q: XTYPE) -> np.ndarray:
+        """Quantile function. Uses the GPD ``isf`` above the junction so that ``q`` near 1 stays precise."""
+        q = _as_float_array(q)
+        with np.errstate(invalid='ignore'):
+            out = np.where(
+                q > self.qjunc,
+                self.tail.isf(self.gamma * (1.0 - q)),
+                self.body.ppf(self.gamma * q),
+            )
+        return _scalar_or_array(out)
 
-        See Docs for derivation
+    def isf(self, p: XTYPE) -> np.ndarray:
+        """Inverse survival function: ``x`` with ``P(X > x) = p``."""
+        p = _as_float_array(p)
+        with np.errstate(invalid='ignore'):
+            out = np.where(
+                p < self.tail_mass,
+                self.tail.isf(self.gamma * p),
+                self.body.isf(self.gamma * p - self._phi_s),
+            )
+        return _scalar_or_array(out)
 
-        Parameters
-        ----------
-        q:      float, iterable of floats between [0, 1]
+    # ---- moments ------------------------------------------------------------
+    def _gpd_mean(self) -> float:
+        return self.a + self.b / (1 - self.xi) if self.xi < 1 else np.inf
 
-        Return
-        -------
-        float or iterable of floats returning x values corresponding to the given quantiles
-        """
-        ppf = np.where(
-            q > self.qjunc,
-            self.tail.ppf(self.gamma * (q - self.qjunc)),
-            self.body.ppf(self.gamma*q)
-        )
-        return ppf    
+    def _gpd_var(self) -> float:
+        if self.xi >= 0.5:
+            return np.inf
+        return self.b ** 2 / ((1 - self.xi) ** 2 * (1 - 2 * self.xi))
+
+    def _truncated_body(self):
+        """The Gaussian body conditioned on ``x <= a`` (bounds standardised, as SciPy requires)."""
+        return scist.truncnorm(-np.inf, self.s, loc=self.mu, scale=self.sig)
 
     def mean(self) -> float:
-        """
-        First moment
-
-        See Docs for derivation
-        """
-        bmu = scist.truncnorm(
-            -np.inf, 
-            self.a, 
-            *self.body.args
-        ).mean()
-        tmu = self.tail.mean()
-        rmu = (bmu + tmu) / self.gamma
-
-        return rmu
+        """First moment; ``inf`` for ``xi >= 1``."""
+        if self.xi >= 1:
+            return np.inf
+        return self.body_mass * float(self._truncated_body().mean()) + self.tail_mass * self._gpd_mean()
 
     def var(self) -> float:
-        """
-        Second moment
+        """Variance; ``inf`` for ``xi >= 1/2``."""
+        if self.xi >= 0.5:
+            return np.inf
+        tb = self._truncated_body()
+        m_b, v_b = float(tb.mean()), float(tb.var())
+        m_t, v_t = self._gpd_mean(), self._gpd_var()
+        second = self.body_mass * (v_b + m_b ** 2) + self.tail_mass * (v_t + m_t ** 2)
+        return second - self.mean() ** 2
 
-        See Docs for derivation
-        """
-        bvar = scist.truncnorm(
-            -np.inf, 
-            self.a, 
-            *self.body.args
-        ).var()
-        tvar = self.tail.var()
-        rvar = (bvar + tvar) / self.gamma
-        return rvar
+    # ---- partial first moments (for expected shortfall) ---------------------
+    def _gauss_lower_partial(self, t: np.ndarray) -> np.ndarray:
+        """``int_{-inf}^{min(t, a)} x phi(x) dx`` (un-normalised Gaussian part)."""
+        z = np.minimum(self._zscore(t), self.s)
+        return self.mu * scist.norm.cdf(z) - self.sig * scist.norm.pdf(z)
+
+    def _gauss_upper_partial(self, t: np.ndarray) -> np.ndarray:
+        """``int_{min(t, a)}^{a} x phi(x) dx``."""
+        z = np.minimum(self._zscore(t), self.s)
+        return self.mu * (self._phi_s - scist.norm.cdf(z)) - self.sig * (scist.norm.pdf(self.s) - scist.norm.pdf(z))
+
+    def _gpd_lower_partial(self, t: np.ndarray) -> np.ndarray:
+        """``int_{a}^{max(t, a)} x g(x) dx`` for the un-normalised GPD part; finite for every ``xi``."""
+        y = np.maximum(t - self.a, 0.0)
+        sf = self.tail.sf(np.maximum(t, self.a))
+        g = self.tail.cdf(np.maximum(t, self.a))
+        if self.xi == 1:
+            inner = -y * sf + self.b * np.log1p(y / self.b)
+        else:
+            inner = -y * sf + (self.b / (1 - self.xi)) * (1.0 - (1.0 + self.xi * y / self.b) * sf)
+        return self.a * g + inner
+
+    def _gpd_upper_partial(self, t: np.ndarray) -> np.ndarray:
+        """``int_{max(t, a)}^{inf} x g(x) dx``; ``inf`` for ``xi >= 1``."""
+        t = np.asarray(t, float)
+        if self.xi >= 1:
+            return np.full(t.shape, np.inf)
+        t_ = np.maximum(t, self.a)
+        sf = self.tail.sf(t_)
+        return sf * (t_ + (self.b + self.xi * (t_ - self.a)) / (1 - self.xi))
+
+    def lower_partial_mean(self, t: XTYPE) -> np.ndarray:
+        """``int_{-inf}^{t} x f(x) dx``."""
+        t = _as_float_array(t)
+        return _scalar_or_array((self._gauss_lower_partial(t) + self._gpd_lower_partial(t)) / self.gamma)
+
+    def upper_partial_mean(self, t: XTYPE) -> np.ndarray:
+        """``int_{t}^{inf} x f(x) dx``; ``inf`` for ``xi >= 1``."""
+        t = _as_float_array(t)
+        return _scalar_or_array((self._gauss_upper_partial(t) + self._gpd_upper_partial(t)) / self.gamma)
+
 
 class CarBenLeft(CarBenBase):
     """
-    Right-tailed CarBen distribution.
+    Left-tailed CarBen hybrid: the reflection of :class:`CarBenRight` about ``mu``,
+    ``f_L(x) = f_R(2 mu - x)``. Generalized Pareto for ``x < a``, Gaussian for ``x >= a``.
 
-    Assigns `_tail`, handler methods, and common distribution functions that 
-    are specific to the tail direction.
+    Every method is evaluated through the mirrored right-tailed component, so the
+    two sides cannot drift apart.
     """
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        
-        # NOTE: `a` is inverted to reflect the distribution appropriately
+        self._mirror = CarBenRight(self.xi, self.mu, sig=self.sig)
+        # Tail of the reflected variable -x, kept for backwards compatibility:
+        # ``tail.pdf(-x)`` is the GPD density of the left tail at ``x``.
         self._tail = scist.genpareto(self.xi, loc=-self.a, scale=self.b)
 
     def _calc_a(self) -> float:
-        """
-        see Equation 8 in Carreau and Bengio (2008)   
-
-        For the left-tail, the valence of second term is changed to account for 
-        reflection of the distribution.
-        """
-        return self.mu - self.sig*np.sqrt(self.W_z())
+        """Equation 8 with the sign of the second term flipped: ``a = mu - sig sqrt(W(z))``."""
+        return self.mu - self.sig * self.s
 
     def _calc_sig(self) -> float:
-        """
-        rearrangement of Equation 8 in Carreau and Bengio (2008)        
+        return (self.mu - self.a) / self.s
 
-        Again, the valence is changed
-        """
-        return (self.mu - self.a) / np.sqrt(self.W_z())
+    def _reflect(self, x: XTYPE) -> np.ndarray:
+        return 2.0 * self.mu - _as_float_array(x)
 
-    @argsetter('x')
-    def pdf(self, x:XTYPE=None) -> np.ndarray:
-        """
-        Probability density function
+    def pdf(self, x: XTYPE) -> np.ndarray:
+        return self._mirror.pdf(self._reflect(x))
 
-        See Docs for derivation
-        
-        Parameters
-        ----------
-        x:      float, m x n iterable of floats of random variable samples
+    def logpdf(self, x: XTYPE) -> np.ndarray:
+        return self._mirror.logpdf(self._reflect(x))
 
-        Return
-        -------
-        float or iterable of floats returning the likelihood of occurence of each sample        
-        """
-        pdf = np.where(
-            x < self.a,
-            self.tail.pdf(-x),
-            self.body.pdf(x)            
-        )
-        return pdf / self.gamma
-    
-    @argsetter('x')
-    def cdf(self, x:XTYPE=None) -> np.ndarray:
-        """
-        Cumulative Distribtion Function, P(X<x)
+    def cdf(self, x: XTYPE) -> np.ndarray:
+        return self._mirror.sf(self._reflect(x))
 
-        See Docs for derivation
+    def sf(self, x: XTYPE) -> np.ndarray:
+        return self._mirror.cdf(self._reflect(x))
 
-        Parameters
-        ----------
-        x:      float, m x n iterable of floats of random variable samples
+    def logcdf(self, x: XTYPE) -> np.ndarray:
+        return self._mirror.logsf(self._reflect(x))
 
-        Return
-        -------
-        float or iterable of floats returning cumulative probability of each sample
-        """
-        cdf = np.where(
-            x < self.a,
-            (1 - self.tail.cdf(-x)),
-            1 + self.body.cdf(x) - self.body.cdf(self.a),
-        )
-        return cdf / self.gamma
-        
+    def logsf(self, x: XTYPE) -> np.ndarray:
+        return self._mirror.logcdf(self._reflect(x))
+
     @property
-    def qjunc(self):
-        """
-        Quantile of the juncture point, a, between the tail and body
-        
-        See Docs for derivation
-        """
+    def qjunc(self) -> float:
+        """CDF at the junction ``a``: ``1 / gamma``."""
         return 1 / self.gamma
-    
-    def ppf(self, q:XTYPE) -> np.ndarray:
-        """
-        Quantile function, analogous to `ppf` method in `scipy`.
 
-        See Docs for derivation
+    def ppf(self, q: XTYPE) -> np.ndarray:
+        return _scalar_or_array(2.0 * self.mu - self._mirror.isf(q))
 
-        Parameters
-        ----------
-        q:      float, iterable of floats between [0, 1]
-
-        Return
-        -------
-        float or iterable of floats returning x values corresponding to the given quantiles
-        """
-        ppf = np.where(
-            q < self.qjunc,
-            -self.tail.ppf(1 - q*self.gamma),
-            self.body.ppf(self.gamma*q + self.gamma*self.qjunc - self.gamma)
-        )
-        return ppf
+    def isf(self, p: XTYPE) -> np.ndarray:
+        return _scalar_or_array(2.0 * self.mu - self._mirror.ppf(p))
 
     def mean(self) -> float:
-        """
-        First moment
-
-        See Docs for derivation
-        """
-        bmu = scist.truncnorm(
-            self.a,
-            np.inf, 
-            *self.body.args
-        ).mean()
-        tmu = -self.tail.mean()
-        lmu = (bmu + tmu) / self.gamma
-
-        return lmu
+        """First moment; ``-inf`` for ``xi >= 1``."""
+        return 2.0 * self.mu - self._mirror.mean()
 
     def var(self) -> float:
-        """
-        Second moment
+        return self._mirror.var()
 
-        See Docs for derivation
-        """
-        bvar = scist.truncnorm(
-            self.a,
-            np.inf, 
-            *self.body.args
-        ).var()
-        tvar = self.tail.var()
-        lvar = (bvar + tvar) / self.gamma
-        return lvar
+    def lower_partial_mean(self, t: XTYPE) -> np.ndarray:
+        """``int_{-inf}^{t} x f(x) dx``; ``-inf`` for ``xi >= 1``."""
+        r = self._reflect(t)
+        return _scalar_or_array(2.0 * self.mu * self._mirror.sf(r) - self._mirror.upper_partial_mean(r))
+
+    def upper_partial_mean(self, t: XTYPE) -> np.ndarray:
+        """``int_{t}^{inf} x f(x) dx``."""
+        r = self._reflect(t)
+        return _scalar_or_array(2.0 * self.mu * self._mirror.cdf(r) - self._mirror.lower_partial_mean(r))
+
 
 class CarBenHybrid:
     """
