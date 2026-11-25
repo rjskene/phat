@@ -19,6 +19,8 @@ except PackageNotFoundError:  # running from a source checkout
 _LAZY = {
     "two_tailed_hill_double_bootstrap": "phat.bootstrap",
     "PhatFit": "phat.fit",
+    "PhatFitResult": "phat.fit",
+    "fit_phat": "phat.fit",
     "PhatNet": "phat.learn",
     "PhatLoss": "phat.learn",
     "PhatMetric": "phat.learn",

@@ -5,13 +5,12 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Any, Union
 
 import numpy as np
 import scipy.stats
 
 if TYPE_CHECKING:  # optional packages, imported for annotations only
-    import matplotlib.pyplot as plt
     import pmdarima
     from arch.univariate.base import ARCHModelResult
 
@@ -25,7 +24,7 @@ try:
     import numba as nb
     _njit = nb.njit
 except ImportError:  # pragma: no cover - exercised in the core-only CI job
-    nb = None
+    nb = None  # type: ignore[assignment]
 
     def _njit(*args, **kwargs):
         if len(args) == 1 and callable(args[0]) and not kwargs:
@@ -59,8 +58,8 @@ def _is_pmdarima_arima(obj) -> bool:
 ###### Numba helper functions to improve GarchForecast speed ######
 @_njit(cache=True)
 def _step_sum(
-    params:Iterable[float],
-    values:Iterable[float]
+    params:np.ndarray,
+    values:np.ndarray
     ) -> float:
     """
     Summation term of an AR(m), MA(n), or GARCH(p) / GARCH(q) process
@@ -114,13 +113,13 @@ def _arma_one_step(
 def _garch_one_step(
     vols:np.ndarray,
     resids:np.ndarray,
-    innov:np.ndarray,
+    innov:float,
     constant:float,
     arch_params:np.ndarray,
     garch_params:np.ndarray,
     p:int,
     q:int
-    ) -> float:
+    ) -> tuple[float, float]:
     """
     GARCH calculation for single step of forecast. Captures correlation of
     current period volatility with prior period residuals. The ARCH process is
@@ -160,19 +159,38 @@ class PROCESSMIXIN:
     """
     Mixin to provide common functionality to MEAN and VOL classes
     """
+    params: np.ndarray
+
+    @property
+    def order(self) -> tuple[int, int]:
+        raise NotImplementedError
+
+    @property
+    def properties(self) -> tuple:
+        raise NotImplementedError
+
     @property
     def constant(self) -> float:
-        return self.params[0]
+        return float(self.params[0])
 
     @property
     def max_order(self) -> int:
         return max(self.order)
 
     @property
-    def props(self) -> Union[None, tuple]:
+    def props(self) -> tuple:
         return self.properties
 
-    def _infer_order(self, params) -> tuple:
+    @staticmethod
+    def _as_params(params: Any) -> np.ndarray:
+        """``None``, a sequence or a pandas Series of parameters as a float array."""
+        if params is None:
+            return np.zeros(0)
+        if hasattr(params, 'to_numpy'):
+            params = params.to_numpy()
+        return np.asarray(params, dtype=float).ravel()
+
+    def _infer_order(self, params) -> tuple[int, int]:
         """
         Infers the order of an ARMA or GARCH process.
 
@@ -207,11 +225,13 @@ class MEAN(PROCESSMIXIN):
     order:      tuple; 2x1 of m, n order (m = AR process, n = MA process)
     """
     def __init__(self,
-        params:Iterable,
-        order:tuple=None,
+        params:Any,
+        order:tuple[int, int] | None=None,
         ):
-        self.params = params.values if hasattr(params, 'values') else params
-        self._m, self._n = self._infer_order(params[1:]) if order is None else order
+        self.params = self._as_params(params)
+        self._m, self._n = (
+            self._infer_order(self.params[1:]) if order is None else (int(order[0]), int(order[1]))
+        )
 
     @property
     def m(self) -> int:
@@ -222,19 +242,19 @@ class MEAN(PROCESSMIXIN):
         return self._n
 
     @property
-    def order(self) -> tuple:
+    def order(self) -> tuple[int, int]:
         return self.m, self.n
 
     @property
-    def ar_params(self) -> Iterable:
+    def ar_params(self) -> np.ndarray:
         return self.params[1:1+self.m]
 
     @property
-    def ma_params(self) -> Iterable:
+    def ma_params(self) -> np.ndarray:
         return self.params[1+self.m:1+self.m+self.n]
 
     @property
-    def properties(self) -> Union[None, tuple]:
+    def properties(self) -> tuple:
         return self.constant, self.ar_params, self.ma_params, self.m, self.n
 
 class VOL(PROCESSMIXIN):
@@ -251,11 +271,13 @@ class VOL(PROCESSMIXIN):
                         n = autoregressive to prior residuals
     """
     def __init__(self,
-        params:Iterable,
-        order:tuple=None
+        params:Any,
+        order:tuple[int, int] | None=None
         ):
-        self.params = params.values if hasattr(params, 'values') else params
-        self._p, self._q = self._infer_order(params[1:]) if order is None else order
+        self.params = self._as_params(params)
+        self._p, self._q = (
+            self._infer_order(self.params[1:]) if order is None else (int(order[0]), int(order[1]))
+        )
 
     @property
     def p(self) -> int:
@@ -266,19 +288,19 @@ class VOL(PROCESSMIXIN):
         return self._q
 
     @property
-    def order(self) -> tuple:
+    def order(self) -> tuple[int, int]:
         return self.p, self.q
 
     @property
-    def arch_params(self):
+    def arch_params(self) -> np.ndarray:
         return self.params[1:1+self.q]
 
     @property
-    def garch_params(self):
+    def garch_params(self) -> np.ndarray:
         return self.params[1+self.q:1+self.q+self.p]
 
     @property
-    def properties(self) -> Union[None, tuple]:
+    def properties(self) -> tuple:
         return self.constant, self.arch_params, self.garch_params, self.p, self.q
 
 class GarchcastResults:
@@ -301,6 +323,7 @@ class GarchcastResults:
         self.values = values
         self.vols = vols
         self.resids = resids
+        self._sim: PriceSim | None = None
 
         self.iters, self.periods = values.shape
 
@@ -313,14 +336,13 @@ class GarchcastResults:
         return self.vols**2
 
     @property
-    def sim(self) -> np.ndarray:
-        if hasattr(self, '_sim'):
-            return self._sim
-        else:
+    def sim(self) -> PriceSim:
+        if self._sim is None:
             raise ValueError('You must plot a price simulation or call `_make_sim` directly')
+        return self._sim
 
     @argsetter(['iters', 'periods'])
-    def _make_sim(self, iters:int, periods:int, p:float=1):
+    def _make_sim(self, iters:int, periods:int, p:float=1) -> PriceSim:
         """
         Creates a price simulator used to generate images
         """
@@ -330,20 +352,26 @@ class GarchcastResults:
     def plot(
         self,
         kind:str='vol',
-        ax:Union[plt.Axes, Iterable[plt.Axes]]=None,
-        *args, **kwargs
-        ) -> Union[plt.Axes, Iterable[plt.Axes]]:
+        ax:Any=None,
+        *args: Any,
+        p: float = 1.0,
+        n: int = 1,
+        **kwargs: Any
+        ) -> Any:
         """
-        Main method used to generate plots
+        Main method used to generate plots. Needs matplotlib (the ``plot`` extra).
 
         Params
         -------
         kind:    str; kind of plot. Accepts 'vol', 'var', 'price', or 'end_price'
         ax:      matplotlib Axes object(s); if one is not provided, it will be created.
+        p:       float; starting price for 'price' and 'end_price'
+        n:       int; number of simulated paths to draw for 'price'
+        *args, **kwargs:    forwarded to the matplotlib call ('price' and 'end_price' take keywords only)
 
         Return
         -------
-        ax:      matplotlib Axes object(s)
+        ax:      matplotlib Axes object(s); for 'end_price' a tuple ``(ax, prices, bins)``
         """
         import matplotlib.pyplot as plt
         multi_ax = ['price']
@@ -355,32 +383,15 @@ class GarchcastResults:
         elif kind == 'var':
             ax = self._plot_var(ax, *args, **kwargs)
         elif kind == 'price':
-            if len(args) > 1:
-                p = args[0]
-            if len(args) > 2:
-                n = args[2]
-            if 'p' in kwargs:
-                p = kwargs['p']
-                kwargs.pop('p')
-            if 'n' in kwargs:
-                n = kwargs['n']
-                kwargs.pop('n')
-
-            ax = self._plot_price(p, n, ax, *args, **kwargs)
+            ax = self._plot_price(p, n, ax, **kwargs)
         elif kind == 'end_price':
-            if len(args) > 1:
-                p = args[0]
-            if 'p' in kwargs:
-                p = kwargs['p']
-                kwargs.pop('p')
-
-            return self._plot_end_price(p, ax, *args, **kwargs)
+            return self._plot_end_price(p, ax, **kwargs)
         else:
             raise ValueError(f'`kind:` {kind} not supported')
 
         return ax
 
-    def _plot_vol(self, ax:plt.Axes, *args, **kwargs) -> Union[plt.Axes, Iterable[plt.Axes]]:
+    def _plot_vol(self, ax:Any, *args, **kwargs) -> Any:
         import matplotlib.pyplot as plt
         ax.plot((self.vols).mean(axis=0))
         ax.set_xlabel('Days')
@@ -388,7 +399,7 @@ class GarchcastResults:
 
         return ax
 
-    def _plot_var(self, ax, *args, **kwargs) -> Union[plt.Axes, Iterable[plt.Axes]]:
+    def _plot_var(self, ax:Any, *args, **kwargs) -> Any:
         import matplotlib.pyplot as plt
         ax.plot((self.vols**2).mean(axis=0), *args, **kwargs)
         ax.set_xlabel('Days')
@@ -399,14 +410,18 @@ class GarchcastResults:
     def _plot_price(self,
         p:float,
         n:int,
-        axes:Iterable[plt.Axes],
-        *args, **kwargs
-        ) -> Iterable[plt.Axes]:
+        axes:Any,
+        **kwargs
+        ) -> Any:
         sim = self._make_sim(p=p)
+        rng = _rng(kwargs.pop('random_state', None))
 
         all_axes = []
-        for i in np.random.randint(0, self.iters, size=n):
-            _, __, chart_axes = sim.sim(None, 1 + self.values[i]/100, None, True, *args, axes=axes, **kwargs)
+        for i in rng.choice(self.iters, size=min(int(n), self.iters), replace=False):
+            # keyword call: argsetter maps positional arguments onto (p0, rets, periods) only
+            _, __, chart_axes = sim.sim(
+                rets=1 + self.values[i]/100, periods=self.periods, show_chart=True, axes=axes, **kwargs
+            )
             all_axes.append(chart_axes)
 
         if axes is None:
@@ -416,11 +431,11 @@ class GarchcastResults:
 
     def _plot_end_price(self,
         p:float,
-        ax:plt.Axes,
-        *args, **kwargs
-        ) -> tuple[plt.Axes, np.ndarray, np.ndarray]:
+        ax:Any,
+        **kwargs
+        ) -> tuple[Any, np.ndarray, np.ndarray]:
         sim = self._make_sim(p=p)
-        _, P, (ax, bins) = sim.sims(None, 1 + self.values/100, True, *args, ax=ax, **kwargs)
+        _, P, (ax, bins) = sim.sims(rets=1 + self.values/100, show_chart=True, ax=ax, **kwargs)
         return ax, P, bins
 
 class Garchcaster:
@@ -459,49 +474,59 @@ Params:
     GARCH_HAS_MEAN_PROCESS = False
 
     def __init__(self,
-        garch:Union[ARCHModelResult, Iterable[float]]=None,
-        arma:Union[pmdarima.ARIMA, Iterable[float]]=None,
-        y:Iterable[float]=None,
-        vols:Iterable[float]=None,
-        resids:Iterable[float]=None,
+        garch:Union[ARCHModelResult, Iterable[float], None]=None,
+        arma:Union[pmdarima.ARIMA, Iterable[float], None]=None,
+        y:Iterable[float] | None=None,
+        vols:Iterable[float] | None=None,
+        resids:Iterable[float] | None=None,
         iters:int=1,
         periods:int=252,
-        order:tuple=None,
-        dist:ALLOWED_DISTS=None,
+        order:tuple[int, ...] | None=None,
+        dist:ALLOWED_DISTS | None=None,
         use_backcast:bool=True,
         ):
+        garch_any: Any = garch   # fitted models are duck-typed; see _is_arch_result
+        arma_any: Any = arma
+        mean_order: tuple[int, int] | None
+        vol_order: tuple[int, int] | None
+
         ### First, set self.mean
-        if _is_pmdarima_arima(arma):
-            m, _, n = arma.order
+        if _is_pmdarima_arima(arma_any):
+            m, _, n = arma_any.order
             mean_order = (m,n)
-            mean_params = arma.params()[:5]
-        elif _is_arch_result(garch):
-            if _is_constant_mean(garch.model):
+            mean_params = arma_any.params()[:5]
+        elif _is_arch_result(garch_any):
+            if _is_constant_mean(garch_any.model):
                 mean_order = (0, 0)
-                mean_params = garch.params[:1]
+                mean_params = garch_any.params[:1]
             else:
-                mean_order = (garch.model.lags[0].size, 0)
-                mean_params = garch.params[:mean_order[0]+1]
+                mean_order = (garch_any.model.lags[0].size, 0)
+                mean_params = garch_any.params[:mean_order[0]+1]
                 self.GARCH_HAS_MEAN_PROCESS = True
         elif arma is not None:
-            mean_order = list(order)[:2] if order is not None else None
-            mean_params = arrayarize(arma)
+            mean_order = (int(order[0]), int(order[1])) if order is not None else None
+            mean_params = arrayarize(arma_any)
+        else:
+            raise ValueError(
+                'Provide `arma` (parameters or a fitted model) or a fitted `arch` model as `garch`'
+            )
 
         self.mean = MEAN(mean_params, order=mean_order)
 
         ### Second, set self.vol
-        if _is_arch_result(garch):
-            if hasattr(garch.model.volatility, 'p'):
-                vol_order = (garch.model.volatility.p, garch.model.volatility.q)
+        if _is_arch_result(garch_any):
+            if hasattr(garch_any.model.volatility, 'p'):
+                vol_order = (garch_any.model.volatility.p, garch_any.model.volatility.q)
             else:
                 vol_order = (0, 0)
 
-            vol_params = garch.params[mean_order[0]+1:] if self.GARCH_HAS_MEAN_PROCESS else garch.params[1:]
-        elif isinstance(garch, (list, tuple, set, np.ndarray)):
-            vol_params = arrayarize(garch)
-            vol_order = list(order)[2:] if order is not None else None
+            first = self.mean.m + 1 if self.GARCH_HAS_MEAN_PROCESS else 1
+            vol_params = garch_any.params[first:]
+        elif garch is not None:
+            vol_params = arrayarize(garch_any)
+            vol_order = (int(order[2]), int(order[3])) if order is not None else None
         else:
-            vol_order = (0, 0)
+            raise ValueError('Provide `garch` (parameters or a fitted arch model)')
 
         self.vol = VOL(vol_params, order=vol_order)
         self.order = (*self.mean.order, *self.vol.order)
@@ -515,65 +540,72 @@ Params:
         self.maxlag = max(self.order)
 
         ### Third, assign values
-        if _is_arch_result(garch):
+        if _is_arch_result(garch_any):
             if any([y is not None, vols is not None, resids is not None]):
                 raise ValueError('If `garch` is ARCHModelResult do not provide `y`, `vol`, or `resids`')
-            else:
-                y = garch.std_resid.values[self.maxlag:].copy()
-                vols = garch.conditional_volatility.values[self.maxlag:].copy()
-                resids = garch.resid.values[self.maxlag:].copy()
+            y_arr = np.asarray(garch_any.std_resid, dtype=float)[self.maxlag:].copy()
+            vols_arr = np.asarray(garch_any.conditional_volatility, dtype=float)[self.maxlag:].copy()
+            resids_arr = np.asarray(garch_any.resid, dtype=float)[self.maxlag:].copy()
         else:
-            y = arrayarize(y).copy()
-            vols = arrayarize(vols).copy()
-            resids = arrayarize(resids).copy()
+            if y is None or vols is None or resids is None:
+                raise ValueError('Provide `y`, `vols` and `resids` when `garch` is not a fitted arch model')
+            y_arr = arrayarize(y).astype(float)
+            vols_arr = arrayarize(vols).astype(float)
+            resids_arr = arrayarize(resids).astype(float)
 
         self.periods = periods
         self.iters = iters
 
-        self.y_hist = y[-self.maxlag:]
-        self.vols_hist = vols[-self.maxlag:]
-        self.resids_hist = self._backcast(resids, self.maxlag) if use_backcast else resids[-self.maxlag:]
+        self.y_hist = y_arr[-self.maxlag:]
+        self.vols_hist = vols_arr[-self.maxlag:]
+        self.resids_hist = (
+            self._backcast(resids_arr, self.maxlag) if use_backcast else resids_arr[-self.maxlag:]
+        )
 
         self._dist = dist
 
     @property
-    def dist(self) -> ALLOWED_DISTS:
+    def dist(self) -> ALLOWED_DISTS | None:
         """Innovation distribution; ``None`` means standard Gaussian innovations."""
         return self._dist
 
     @argsetter(['iters', 'periods'], flat=True)
     def _sample_innovs(self,
-        iters:int=None,
-        periods:int=None,
-        dist:ALLOWED_DISTS=None,
-        seed:int=None,
+        iters:int | None=None,
+        periods:int | None=None,
+        dist:ALLOWED_DISTS | None=None,
+        seed:Any=None,
+        random_state:Any=None,
         ) -> np.ndarray:
         """
         Generates innovations according to the provided distribution. If a distribution is not
         provided, default is Gaussian.
+
+        A :class:`~phat.Phat` innovation distribution is sampled with its exact
+        sampler, :meth:`~phat.Phat.std_rvs`, so the innovations have unit
+        variance (this needs both tail shapes below 1/2).
 
         Params
         -------
         iters:          int; number of iterations of forecast
         periods:        int; number of periods in each iteration of the forecast
         dist:           Phat or scipy rv_frozen class; distribution used to generate residuals
-        seed:           int; random state for innovation determination if `innovs` is not provided
-
+        random_state:   ``None``, int seed, ``numpy.random.Generator`` or ``RandomState``
+        seed:           alias of ``random_state``
 
         Return
         -------
         innovs:         np.ndarray
         """
-        if self._dist is None and dist is None:
-            innovs = _rng(seed).standard_normal((iters, periods))
-        else:
-            dist = dist if dist is not None else self._dist
-            rvfunc = dist.std_rvs if hasattr(dist, 'std_rvs') else dist.rvs
-            innovs = rvfunc(size=(iters, periods), seed=seed)
+        shape = (int(iters), int(periods))  # type: ignore[arg-type]  # filled by argsetter
+        rng = _rng(random_state if random_state is not None else seed)
+        dist = dist if dist is not None else self._dist
+        if dist is None:
+            return rng.standard_normal(shape)
+        rvfunc = dist.std_rvs if hasattr(dist, 'std_rvs') else dist.rvs
+        return np.asarray(rvfunc(size=shape, random_state=rng), dtype=float)
 
-        return innovs
-
-    def _backcast(self, resids, maxlag):
+    def _backcast(self, resids: np.ndarray, maxlag: int) -> np.ndarray:
         power = 2
         tau = min(75, resids.shape[0])
         w = 0.94 ** np.arange(tau)
@@ -593,7 +625,7 @@ Params:
         periods:int,
         mean_args:tuple,
         vol_args:tuple,
-        ) -> tuple[np.ndarray]:
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Main iterative, feed-forward function for forecasting an ARMA-GARCH process.
 
@@ -650,11 +682,12 @@ Params:
 
     @argsetter(['dist', 'iters', 'periods'], flat=True)
     def forecast(self,
-        iters:int=None,
-        periods:int=None,
-        dist:ALLOWED_DISTS=None,
-        innovs:Iterable=None,
-        seed:int=None,
+        iters:int | None=None,
+        periods:int | None=None,
+        dist:ALLOWED_DISTS | None=None,
+        innovs:Iterable[float] | None=None,
+        seed:Any=None,
+        random_state:Any=None,
         ) -> GarchcastResults:
         """
         User-facing interface with forecast generator
@@ -668,18 +701,26 @@ Params:
                 distribution used to generate residuals
             innovs: np.ndarray
                 iters x periods of garch residuals
-            seed: int
-                random state for innovation determination if `innovs` is not provided
+            random_state: None, int seed, numpy.random.Generator or RandomState
+                for the innovations if `innovs` is not provided
+            seed: alias of `random_state`
         """
+        n_iters, n_periods = int(iters), int(periods)  # type: ignore[arg-type]  # filled by argsetter
         if innovs is None:
-            innovs = self._sample_innovs(iters, periods, dist=dist, seed=seed)
+            innovs_arr = self._sample_innovs(
+                n_iters, n_periods, dist=dist, seed=seed, random_state=random_state
+            )
+        else:
+            innovs_arr = np.asarray(innovs, dtype=float)
+            if innovs_arr.shape != (n_iters, n_periods):
+                raise ValueError(f'`innovs` must have shape {(n_iters, n_periods)}, got {innovs_arr.shape}')
 
         results = Garchcaster._forecast_looper(
             self.y_hist,
             self.vols_hist,
             self.resids_hist,
-            innovs,
-            iters, periods,
+            innovs_arr,
+            n_iters, n_periods,
             self.mean.props,
             self.vol.props
         )

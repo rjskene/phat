@@ -9,16 +9,13 @@ distributions are for illustration purposes in the docs.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING, Any, Union
+from typing import Any, Union
 
 import numpy as np
 import scipy.special as spec
 import scipy.stats as scist
 
 from phat.utils import XTYPE, argsetter, arrayarize, sech_squared
-
-if TYPE_CHECKING:
-    from phat.fit import PhatFit
 
 
 class BLineSig:
@@ -867,26 +864,43 @@ class Phat:
 
     # ---- estimation ---------------------------------------------------------
     @staticmethod
-    def fit(values, xi_l: float = None, xi_r: float = None) -> PhatFit:
+    def fit(
+        values: Iterable[float],
+        xi_l: float | None = None,
+        xi_r: float | None = None,
+        p: Sequence[float] | None = None,
+        *,
+        backend: str = 'scipy',
+        **kwargs: Any,
+        ) -> Any:
         """
-        Maximum-likelihood fit via ``statsmodels``.
+        Maximum-likelihood fit.
 
         With ``xi_l`` and ``xi_r`` given only ``(mu, sig)`` are estimated (the
-        two-stage estimator); otherwise all four parameters are.
+        two-stage estimator: tail shapes from
+        :func:`~phat.bootstrap.two_tailed_hill_double_bootstrap`, body by
+        likelihood); otherwise all four parameters are. ``p`` fixes the mixture
+        weights (default ``(0.5, 0.5)``). Both variants report standard errors.
 
-        Returns
-        -------
-        ``statsmodels`` results object (``params``, ``bse``, ``llf``, ...)
+        Parameters
+        ----------
+        backend:    ``'scipy'`` (default; NumPy + SciPy only) returns a
+                    :class:`phat.fit.PhatFitResult`; ``'statsmodels'`` returns the
+                    ``statsmodels`` results object of :class:`phat.fit.PhatFit`
+                    and needs the ``fit`` extra.
+        **kwargs:   forwarded to :func:`phat.fit.fit_phat` or to ``PhatFit.fit``
         """
-        try:
-            from phat.fit import PhatFit
-        except ImportError as exc:  # pragma: no cover
-            raise ImportError('Phat.fit requires statsmodels: pip install "phat-tails[fit]"') from exc
-        values = np.asarray(values, dtype=float)
-        exog = np.ones((values.size, 1))  # constant column; the model has no covariates
-        phatfit = PhatFit(values, exog, xi_l, xi_r)
-        return phatfit.fit()
-
+        if backend == 'scipy':
+            from phat.fit import fit_phat
+            return fit_phat(values, xi_l, xi_r, p=p, **kwargs)
+        if backend == 'statsmodels':
+            if p is not None:
+                raise ValueError('the statsmodels backend does not take `p`')
+            from phat.fit import _statsmodels_phatfit
+            x = np.asarray(values, dtype=float)
+            exog = np.ones((x.size, 1))  # constant column; the model has no covariates
+            return _statsmodels_phatfit()(x, exog, xi_l, xi_r).fit(**kwargs)
+        raise ValueError(f"backend must be 'scipy' or 'statsmodels', not {backend!r}")
 
 class PhatStack(Phat):
     """

@@ -40,9 +40,14 @@ change.
   also never flipped sign. Keyword and positional construction now agree, and
   integer / NumPy scalars are accepted for `xi`. The sign-of-`xi` convention
   itself is unchanged (owner decision pending).
+- `GarchcastResults.plot(kind='price')` and `plot(kind='end_price')` never
+  worked: `p` and `n` were read from the wrong positions (`NameError` when
+  omitted) and the `show_chart` flag was dropped by `argsetter`, so the price
+  simulation returned two values where three were unpacked. Both now take
+  `p=` (starting price) and `n=` (paths) as keywords.
 
 ### Added
-- Test suite (`pytest`, 146 tests): density integrates to one, CDF monotone with
+- Test suite (`pytest`, 165 tests): density integrates to one, CDF monotone with
   the right limits, `ppf(cdf(x)) = x`, sampler Kolmogorov-Smirnov against the
   model CDF, moments and expected shortfall against quadrature, location-scale
   behaviour, C1 continuity at the junctions, moment-existence rules, the
@@ -67,6 +72,21 @@ change.
   `numpy.random.Generator` or `RandomState`); `seed=` is kept as an alias.
 - `Phat` validates its parameters: `sig > 0`, `xi_l, xi_r >= 0`, `p` two
   non-negative weights summing to 1.
+- `phat.fit.fit_phat` and `phat.fit.PhatFitResult`: maximum-likelihood fit
+  with `scipy.optimize` (L-BFGS-B) that needs NumPy and SciPy only. Full
+  four-parameter fit, or `mu, sig` with `xi_l, xi_r` fixed (the two-stage
+  estimator), optionally with fixed mixture weights `p`. The result carries
+  `params`, `names`, `bse` (standard errors from the inverse observed
+  information, a finite-difference Hessian at the optimum), `cov`, `llf`,
+  `nobs`, `aic`, `bic`, `conf_int()`, `summary()` and `dist` (the fitted
+  `Phat`). Standard errors agree with the `statsmodels` wrapper to three
+  decimals on a 5,000-point sample and the fit is about four times faster.
+- `Garchcaster.forecast` and `_sample_innovs` accept `random_state`
+  (`None`, int, `numpy.random.Generator` or `RandomState`) like `rvs`;
+  `seed=` stays as an alias. `forecast(innovs=...)` checks the array has shape
+  `(iters, periods)`.
+- `GarchcastResults.plot(kind='price', random_state=...)` picks the displayed
+  paths reproducibly.
 
 ### Changed
 - Packaging moved to a single `pyproject.toml` (`setup.py`, `setup.cfg`,
@@ -85,11 +105,24 @@ change.
   is imported), the progress bar becomes a plain `range`, and matplotlib is
   imported inside the plotting methods.
 - Source is formatted to pass `ruff` (E, F, W, I, B, UP) and `mypy` (lenient:
-  implicit Optional allowed, `phat.tseries` errors ignored until the API pass;
-  `phat.learn` and `phat.bootstrap.tf` are excluded pending the owner's
-  decision on PhatNet).
+  implicit Optional allowed; `phat.learn` and `phat.bootstrap.tf` are excluded
+  pending the owner's decision on PhatNet). `phat.tseries` is fully typed:
+  `MEAN`/`VOL` store parameters as float arrays and orders as `(int, int)`
+  tuples, `Garchcaster` raises `ValueError` (instead of `UnboundLocalError`)
+  when neither parameters nor a fitted model are given.
 - `Garchcaster` with no innovation distribution draws Gaussian innovations with
   `numpy.random.default_rng(seed)` instead of a Numba loop that ignored `seed`.
+  A `Phat` innovation distribution is sampled with the exact unit-variance
+  sampler `Phat.std_rvs(random_state=...)` (the fixed component-then-inverse
+  CDF sampler above), so GARCH forecasts with Phat innovations no longer
+  inherit the old `ppf` error.
+- `Phat.fit(values, xi_l=None, xi_r=None, p=None, *, backend='scipy',
+  **kwargs)` returns a `PhatFitResult` by default and no longer needs
+  `statsmodels`. `backend='statsmodels'` returns the former
+  `GenericLikelihoodModel` results object (needs the `fit` extra). The old
+  call `Phat.fit(x, xi_l, xi_r)` still works; `res.params` is now a NumPy
+  array rather than a pandas Series, so index by position or use
+  `res.params_dict`.
 - `PhatFit` moved to the new module `phat.fit`, which is the only module that
   imports `statsmodels`; `phat.dists.PhatFit` and `phat.PhatFit` still resolve
   to it lazily.
@@ -107,7 +140,8 @@ change.
   from 0.0.x.
 - `CarBenLeft` is implemented as the reflection of `CarBenRight` about `mu`.
 - `Phat.nll` and `Phat.loglike` are per observation and go through `logpdf`.
-- `statsmodels` is imported only when `Phat.fit` is called.
+- `statsmodels` is imported only when `Phat.fit(..., backend='statsmodels')`
+  or `phat.fit.PhatFit` is used.
 - `PhatFit.nloglikeobs` returns `inf` for infeasible parameters instead of
   raising.
 - `import phat` no longer imports TensorFlow, `arch`, `pmdarima` or Numba.

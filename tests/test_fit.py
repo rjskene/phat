@@ -5,54 +5,119 @@ import numpy as np
 import pytest
 
 import phat as ph
+from phat.fit import PhatFitResult, fit_phat
 
-pytestmark = pytest.mark.skipif(importlib.util.find_spec('statsmodels') is None,
-                                reason='Phat.fit needs the fit extra (statsmodels)')
+HAS_STATSMODELS = importlib.util.find_spec('statsmodels') is not None
+TRUE = dict(mu=0.1, sig=1.0, xi_l=0.2, xi_r=0.3)
 
 
 @pytest.fixture(scope='module')
 def sample():
-    true = dict(mu=0.1, sig=1.0, xi_l=0.2, xi_r=0.3)
-    x = ph.Phat(**true).rvs(20_000, random_state=np.random.default_rng(1))
-    return true, x
+    return ph.Phat(**TRUE).rvs(20_000, random_state=np.random.default_rng(1))
 
 
-def test_four_parameter_fit_recovers_parameters(sample):
-    true, x = sample
-    res = ph.Phat.fit(x)
-    mu, sig, xi_l, xi_r = res.params
-    assert abs(mu - true['mu']) < 0.05
-    assert abs(sig - true['sig']) < 0.05
-    assert abs(xi_l - true['xi_l']) < 0.05
-    assert abs(xi_r - true['xi_r']) < 0.05
-    assert np.isfinite(res.llf)
-    assert list(res.model.exog_names)[-2:] == ['xi_l', 'xi_r']
+@pytest.fixture(scope='module')
+def full_fit(sample):
+    return ph.Phat.fit(sample)
 
 
-def test_two_stage_fit_with_fixed_tails(sample):
-    true, x = sample
-    res = ph.Phat.fit(x, xi_l=true['xi_l'], xi_r=true['xi_r'])
-    assert res.params.shape == (2,)
-    assert abs(res.params[0] - true['mu']) < 0.05
-    assert abs(res.params[1] - true['sig']) < 0.05
+@pytest.fixture(scope='module')
+def two_stage_fit(sample):
+    return ph.Phat.fit(sample, xi_l=TRUE['xi_l'], xi_r=TRUE['xi_r'])
 
 
-def test_fit_log_likelihood_matches_the_distribution(sample):
-    true, x = sample
-    res = ph.Phat.fit(x, xi_l=true['xi_l'], xi_r=true['xi_r'])
-    dist = ph.Phat(res.params[0], res.params[1], true['xi_l'], true['xi_r'])
-    assert np.isclose(res.llf, dist.logpdf(x).sum())
+def test_default_backend_needs_only_numpy_and_scipy(full_fit):
+    assert isinstance(full_fit, PhatFitResult)
 
 
-def test_infeasible_parameters_score_inf():
-    from phat.fit import PhatFit
-    x = np.array([0.1, -0.2, 0.3])
-    model = PhatFit(x, np.ones((3, 1)), 0.2, 0.2)
-    assert np.isinf(model.nloglikeobs(np.array([0.0, -1.0]))).all()   # sig < 0
-    assert np.isfinite(model.nloglikeobs(np.array([0.0, 1.0]))).all()
+def test_four_parameter_fit_recovers_parameters(full_fit):
+    assert full_fit.names == ('mu', 'sig', 'xi_l', 'xi_r')
+    assert full_fit.converged
+    for est, (name, truth) in zip(full_fit.params, TRUE.items()):
+        assert abs(est - truth) < 0.05, name
+    assert np.isfinite(full_fit.llf)
+    assert full_fit.nobs == 20_000
 
 
-def test_phatfit_is_reachable_from_old_import_paths():
-    from phat.fit import PhatFit
-    assert ph.PhatFit is PhatFit
-    assert ph.dists.PhatFit is PhatFit
+def test_standard_errors_are_finite_and_cover_the_truth(full_fit):
+    assert full_fit.bse.shape == (4,)
+    assert np.all(np.isfinite(full_fit.bse)) and np.all(full_fit.bse > 0)
+    lo, hi = full_fit.conf_int(alpha=0.001).T          # 99.9% intervals
+    for name, truth in TRUE.items():
+        i = full_fit.names.index(name)
+        assert lo[i] < truth < hi[i], name
+    assert np.allclose(full_fit.bse, np.sqrt(np.diag(full_fit.cov)))
+
+
+def test_two_stage_fit_with_fixed_tails(two_stage_fit):
+    res = two_stage_fit
+    assert res.names == ('mu', 'sig')
+    assert res.params.shape == (2,) and res.bse.shape == (2,)
+    assert abs(res.params[0] - TRUE['mu']) < 0.05
+    assert abs(res.params[1] - TRUE['sig']) < 0.05
+    assert res.fixed['xi_l'] == TRUE['xi_l'] and res.fixed['xi_r'] == TRUE['xi_r']
+    assert np.all(np.isfinite(res.bse))
+
+
+def test_result_dist_and_log_likelihood_match_the_distribution(sample, two_stage_fit):
+    dist = two_stage_fit.dist
+    assert isinstance(dist, ph.Phat)
+    assert dist.xi_l == TRUE['xi_l'] and dist.xi_r == TRUE['xi_r']
+    assert np.isclose(two_stage_fit.llf, dist.logpdf(sample).sum())
+    assert np.isclose(two_stage_fit.aic, 2 * 2 - 2 * two_stage_fit.llf)
+    assert np.isclose(two_stage_fit.bic, 2 * np.log(len(sample)) - 2 * two_stage_fit.llf)
+
+
+def test_fixing_one_tail_only_is_rejected(sample):
+    with pytest.raises(ValueError):
+        ph.Phat.fit(sample, xi_l=0.2)
+
+
+def test_fit_with_fixed_mixture_weights(sample):
+    res = fit_phat(sample, p=(0.4, 0.6))
+    assert res.fixed['p'] == (0.4, 0.6)
+    assert np.allclose(res.dist.p, (0.4, 0.6))
+    assert res.llf < ph.Phat.fit(sample).llf     # the wrong weights fit worse
+
+
+def test_summary_mentions_every_parameter(full_fit):
+    text = full_fit.summary()
+    for name in ('mu', 'sig', 'xi_l', 'xi_r'):
+        assert name in text
+
+
+def test_unknown_backend_is_rejected(sample):
+    with pytest.raises(ValueError):
+        ph.Phat.fit(sample, backend='mle')
+
+
+def test_phatfit_is_lazy_in_the_package_namespace():
+    import phat.fit as fit_module
+    assert 'PhatFit' in dir(fit_module)
+    assert 'PhatFit' in dir(ph)
+
+
+@pytest.mark.skipif(not HAS_STATSMODELS, reason="the statsmodels backend needs the fit extra")
+class TestStatsmodelsBackend:
+    def test_matches_the_scipy_fit(self, sample, full_fit):
+        res = ph.Phat.fit(sample, backend='statsmodels')
+        assert list(res.model.exog_names) == ['mu', 'sig', 'xi_l', 'xi_r']
+        assert np.allclose(res.params, full_fit.params, atol=2e-3)
+        assert np.allclose(res.bse, full_fit.bse, rtol=0.05)
+        assert np.isclose(res.llf, full_fit.llf, atol=0.05)
+
+    def test_infeasible_parameters_score_inf(self):
+        from phat.fit import PhatFit
+        x = np.array([0.1, -0.2, 0.3])
+        model = PhatFit(x, np.ones((3, 1)), 0.2, 0.2)
+        assert np.isinf(model.nloglikeobs(np.array([0.0, -1.0]))).all()   # sig < 0
+        assert np.isfinite(model.nloglikeobs(np.array([0.0, 1.0]))).all()
+
+    def test_phatfit_is_reachable_from_old_import_paths(self):
+        from phat.fit import PhatFit
+        assert ph.PhatFit is PhatFit
+        assert ph.dists.PhatFit is PhatFit
+
+    def test_statsmodels_backend_rejects_p(self, sample):
+        with pytest.raises(ValueError):
+            ph.Phat.fit(sample, p=(0.4, 0.6), backend='statsmodels')

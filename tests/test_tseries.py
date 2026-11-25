@@ -111,6 +111,56 @@ class TestArrayConstructor:
         assert res.values.shape == (4, 5)
         assert np.isfinite(res.values).all()
 
+    def test_phat_innovations_use_the_exact_unit_variance_sampler(self, cast):
+        dist = ph.Phat(0, 1, 0.2, 0.25)
+        rng = np.random.default_rng(7)
+        innovs = cast._sample_innovs(400, 50, dist=dist, random_state=rng)
+        expected = dist.std_rvs(size=(400, 50), random_state=np.random.default_rng(7))
+        assert np.array_equal(innovs, expected)
+        assert abs(innovs.std() - 1) < 0.05
+        assert abs(innovs.mean() - dist.mean() / dist.std()) < 0.05
+
+    def test_random_state_accepts_generator_and_matches_seed(self, cast):
+        a = cast.forecast(random_state=np.random.default_rng(11))
+        b = cast.forecast(seed=11)
+        c = cast.forecast(random_state=11)
+        assert np.array_equal(a.values, b.values)
+        assert np.array_equal(a.values, c.values)
+
+    def test_innovs_shape_is_checked(self, cast):
+        with pytest.raises(ValueError):
+            cast.forecast(innovs=np.zeros((3, 5)))
+
+    def test_scipy_frozen_innovations(self, cast):
+        import scipy.stats
+        res = cast.forecast(dist=scipy.stats.t(5), seed=2)
+        assert res.values.shape == (4, 5)
+        assert np.isfinite(res.values).all()
+
+    def test_make_sim_and_sim_property(self, cast):
+        res = cast.forecast(seed=1)
+        with pytest.raises(ValueError):
+            _ = res.sim
+        sim = res._make_sim(p=100.0)
+        assert res.sim is sim
+
+    @pytest.mark.skipif(importlib.util.find_spec('matplotlib') is None, reason='needs the plot extra')
+    @pytest.mark.parametrize('kind', ['vol', 'var', 'price', 'end_price'])
+    def test_plot_kinds(self, cast, kind):
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        res = cast.forecast(seed=1)
+        out = res.plot(kind=kind, p=100.0, n=2)
+        assert out is not None
+        plt.close('all')
+
+    def test_plot_rejects_unknown_kind(self, cast):
+        pytest.importorskip('matplotlib')
+        res = cast.forecast(seed=1)
+        with pytest.raises(ValueError):
+            res.plot(kind='nope')
+
     def test_garch_variance_recursion(self, cast):
         # one step: var = omega + alpha*resid^2 + beta*vol^2, resid = sqrt(var)*innov, y = c + resid
         innovs = np.full((4, 5), 0.5)
