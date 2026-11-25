@@ -99,9 +99,9 @@ def test_sf_accurate_in_far_tail(pair):
 def test_log_functions(pair):
     dist, _ = pair
     x = np.linspace(dist.mu - 30 * dist.sig, dist.mu + 30 * dist.sig, 301)
-    np.testing.assert_allclose(dist.logpdf(x), np.log(dist.pdf(x)), rtol=1e-12)
-    np.testing.assert_allclose(dist.logcdf(x), np.log(dist.cdf(x)), rtol=1e-12)
-    np.testing.assert_allclose(dist.logsf(x), np.log(dist.sf(x)), rtol=1e-12)
+    np.testing.assert_allclose(dist.logpdf(x), np.log(dist.pdf(x)), rtol=1e-12, atol=1e-14)
+    np.testing.assert_allclose(dist.logcdf(x), np.log(dist.cdf(x)), rtol=1e-12, atol=1e-14)
+    np.testing.assert_allclose(dist.logsf(x), np.log(dist.sf(x)), rtol=1e-12, atol=1e-14)
     far = dist.mu + dist.sig * 1e12
     assert np.isfinite(dist.logsf(far))
     assert np.isfinite(dist.logpdf(far))
@@ -156,7 +156,8 @@ def test_component_moments_with_location_and_scale():
         (0.2, 1.0, np.inf, np.inf),
         (1.0, 0.2, -np.inf, np.inf),
         (1.0, 1.5, np.nan, np.inf),
-        (0.5, 0.2, 0.0, np.inf),
+        (0.5, 0.2, None, np.inf),
+        (0.5, 0.5, 0.0, np.inf),
         (0.2, 0.7, None, np.inf),
     ],
 )

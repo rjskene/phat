@@ -10,9 +10,6 @@ from typing import Union, Iterable, Sequence, Callable, List
 import numpy as np
 import scipy.stats as scist
 import scipy.special as spec
-from scipy._lib._util import check_random_state
-import statsmodels.api as sm
-from statsmodels.base.model import GenericLikelihoodModel
 
 from phat.utils import argsetter, arrayarize, sech_squared, stacker, dotweight, XTYPE
 
@@ -551,330 +548,461 @@ class CarBenHybrid:
         return CarBenRight(*args, **kwargs) if rtail else CarBenLeft(*args, **kwargs)
 
 
-class PhatFit(GenericLikelihoodModel):
+try:
+    from statsmodels.base.model import GenericLikelihoodModel as _GenericLikelihoodModel
+except ImportError:  # statsmodels is only needed for Phat.fit
+    _GenericLikelihoodModel = object
+
+
+class PhatFit(_GenericLikelihoodModel):
     """
-    Light wrapper for statsmodels GenericLogLikelihood. Used to mirror scipy or 
-    statsmodels fit() method.
+    Light wrapper around ``statsmodels`` ``GenericLikelihoodModel`` so that
+    :meth:`Phat.fit` mirrors the ``scipy`` / ``statsmodels`` ``fit()`` interface.
 
     Parameters
     -----------
-    endog:      iterable of dependet variable
-    exog:       iterable of independet variable
-    xi_l:       inverse of tail index of left-tailed generalized Pareto tail. Default: None
-    xi_r:       inverse of tail index of right-tailed generalized Pareto tail. Default: None
-    tail_est:   func; process used to estimate both left and right tail indices. Default: None
-
-    Attributes
-    -----------
-    left:               left-tailed CarBenHybrid object
-    right:              right-tailed CarBenHybrid object
-    args:               list of values of 8 parameters of Phat distribution
-    params:             name-value pairs of 8 parameters of Phat distribution
-    learnable_params:   name-value pairs of 4 given parameters of Phat distribution
-
-    Methods
-    --------
-        > handle helper and common distribution functions that are agnostic to tail-direction
+    endog:      iterable of observations
+    exog:       iterable of regressors (a constant column; the model has no covariates)
+    xi_left:    shape of the left tail. ``None`` to estimate it.
+    xi_right:   shape of the right tail. ``None`` to estimate it.
+    tail_est:   callable returning ``(xi_left, xi_right)`` from ``endog``; used
+                when both shapes are ``None``.
     """
-    def __init__(self, 
-        endog:Iterable, 
-        exog:Iterable,
-        xi_left:float=None, 
-        xi_right:float=None, 
-        tail_est:Callable=None,
+
+    def __init__(self,
+        endog: Iterable,
+        exog: Iterable,
+        xi_left: float = None,
+        xi_right: float = None,
+        tail_est: Callable = None,
         **kwds):
-        
         if xi_right is None and xi_left is None and tail_est is not None:
             self.xi_left, self.xi_right = tail_est(endog)
         else:
             self.xi_left, self.xi_right = xi_left, xi_right
-            
+
         super().__init__(endog, exog, **kwds)
 
     def nloglikeobs(self, params):
-        """
-        Adjust Phat object parameters based on arguments provided at instantiation
-        """
-        if len(params) == 4:
-            phatdist = Phat(*params)
-        else:
-            phatdist = Phat(params[0], params[1], self.xi_left, self.xi_right)
+        """Negative log-likelihood per observation. Infeasible parameters score ``inf``."""
+        try:
+            if len(params) == 4:
+                phatdist = Phat(*params)
+            else:
+                phatdist = Phat(params[0], params[1], self.xi_left, self.xi_right)
+        except ValueError:
+            return np.full(np.shape(self.endog), np.inf)
         return phatdist.nll(self.endog)
 
     def fit(self, start_params=None, maxiter=10000, maxfun=5000, **kwds):
         """
-        Determines start parameters of fit method based on arguments provided at instantiation
-
-        start_params for Gaussian are set via scipy `norm` distribution.
+        Start values: Gaussian ``norm.fit`` for ``(mu, sig)``; ``0.2`` for a free tail shape.
         """
-        if start_params == None:
+        if start_params is None:
             if self.xi_left is None and self.xi_right is None:
-                self.exog_names.append('xi_l')
-                self.exog_names.append('xi_r')
+                if 'xi_l' not in self.exog_names:
+                    self.exog_names.append('xi_l')
+                    self.exog_names.append('xi_r')
                 start_params = np.zeros(4)
                 start_params[:2] = scist.norm.fit(self.endog)
                 start_params[-2:] = [.2, .2]
             else:
-                start_params = np.zeros(2)
-                start_params = scist.norm.fit(self.endog)
-            
+                start_params = np.asarray(scist.norm.fit(self.endog))
+
         return super().fit(
             start_params=start_params,
             maxiter=maxiter, maxfun=maxfun,
             **kwds
         )
 
+
 class Phat:
     """
-    Twin-tailed distribution that combines a right-tailed CarBen with a left-tailed CarBen
+    Two-tailed distribution: a mixture of a left-tailed CarBen hybrid and a
+    right-tailed CarBen hybrid that share the Gaussian location and scale.
 
-    Parameters:
-        mu:    
-            mean of the Gaussian body
-        sig:
-            standard deviation of the Gaussian body
-        xi_l:   
-            inverse of tail index of left-tailed generalized Pareto tail
-        xi_r:   
-            inverse of tail index of right-tailed generalized Pareto tail
-        p:
-            relative weights of the two CarBen hybrids. Default: [.5, .5]
+    Parameters
+    ----------
+    mu:     location of the shared Gaussian body
+    sig:    scale of the shared Gaussian body. **Not** the standard deviation of
+            the Phat variable; see :meth:`std`. For ``xi_l = xi_r = 0.2`` the
+            standard deviation is about ``4.6 sig``.
+    xi_l:   shape of the left generalized Pareto tail, ``>= 0``
+    xi_r:   shape of the right generalized Pareto tail, ``>= 0``
+    p:      mixture weights ``(p_l, p_r)``, non-negative and summing to 1.
+            Default ``(0.5, 0.5)``.
 
-    Attributes:
-        left:               
-            left-tailed CarBenHybrid object
-        right:              
-            right-tailed CarBenHybrid object
+    Attributes
+    ----------
+    left:   :class:`CarBenLeft`
+    right:  :class:`CarBenRight`
 
-    **Details**
+    Notes
+    -----
+    Density ``f = p_l f_L(x; xi_l) + p_r f_R(x; xi_r)``; the CDF is the same
+    weighted sum. The body between the two junctions ``a_l < a_r`` is Gaussian,
+    but it carries only 18-28% of the mass for ``xi`` between 0 and 1 (see
+    :attr:`body_mass`); outside a junction the density is a GPD tail plus the
+    Gaussian remnant of the other component. At ``xi_l = xi_r = 0`` the tails are
+    exponential, so Phat is not Gaussian.
 
-    Per Carreau and Bengio (2008).
-    
-    The properites of the body in both distributions are equivalent; thus, the mixture requires just
-    four parameters: two parameters for the Gaussian body and the tail index for each of the two tails. 
-    In all, the distribution has 8 parameters:
+    The mean exists for ``max(xi_l, xi_r) < 1`` and the variance for
+    ``max(xi_l, xi_r) < 1/2``; beyond those thresholds :meth:`mean` returns
+    ``inf``/``-inf``/``nan`` and :meth:`var` returns ``inf``.
 
-    + Left tail: xi, a, b
-    + Right tail: xi, a, b
-    + Center: mu, sig
-
-    As with any mixture model, this mix is the weighted average result of values from the two
-    components. Default weights are 0.5 / 0.5.
-
-    Weights could otherwise be estimated via machine learning, threshold analysis (for the tails),
-    and gaussian statistics (for the body).
+    The mixing of a hybrid Pareto with its reflection was proposed and used by
+    Carreau (2007, PhD thesis, Universite de Montreal, sections 3.2 and 4.5).
     """
-    PARAM_NAMES = ['mu', 'sig', 'xi_l',  'xi_r', 'a_l', 'a_r', 'b_l', 'b_r']
+    PARAM_NAMES = ['mu', 'sig', 'xi_l', 'xi_r', 'a_l', 'a_r', 'b_l', 'b_r']
 
     def __init__(
-        self, mu:float, sig:float, xi_l:float, xi_r:float, p:Iterable=None
+        self, mu: float, sig: float, xi_l: float, xi_r: float, p: Iterable = None
         ) -> None:
-        """
-        Left and right tails are instantiated immediately
-        """
+        mu, sig, xi_l, xi_r = (float(v) for v in (mu, sig, xi_l, xi_r))
+        if not sig > 0:
+            raise ValueError('`sig` must be positive')
+        if xi_l < 0 or xi_r < 0:
+            raise ValueError('`xi_l` and `xi_r` must be non-negative')
         self.mu = mu
         self.sig = sig
-        self.xi_l = xi_l if xi_l >= 0 else -xi_l
+        self.xi_l = xi_l
         self.xi_r = xi_r
 
-        self.left = CarBenHybrid(xi_l, mu, sig, rtail=False)
-        self.right = CarBenHybrid(xi_r, mu, sig)
+        self.left = CarBenLeft(xi_l, mu, sig)
+        self.right = CarBenRight(xi_r, mu, sig)
 
-        self.p = p if p is not None else np.array([.5,.5])
-    
+        p = np.array([.5, .5]) if p is None else np.asarray(p, dtype=float)
+        if p.shape != (2,) or np.any(p < 0) or not np.isclose(p.sum(), 1.0, rtol=0, atol=1e-12):
+            raise ValueError('`p` must be two non-negative weights summing to 1')
+        self.p = p
+
+    # ---- parameters ---------------------------------------------------------
     @property
     def args(self) -> tuple:
-        """
-        Tuple of the distribution parameters
-        """
+        """Tuple of the distribution parameters, in :attr:`PARAM_NAMES` order."""
         return self.mu, self.sig, self.xi_l, self.xi_r, self.left.a, \
             self.right.a, self.left.b, self.right.b
 
     @property
     def params(self) -> dict:
-        """
-        Dictionary of the distribution parameters
-        """      
+        """Dictionary of the distribution parameters."""
         return {name: arg for name, arg in zip(self.PARAM_NAMES, self.args)}
 
     @property
     def learnable_params(self) -> List[float]:
-        """
-        List of distribution parameters that can be tuned by machine learning approach
-        """
+        """The four free parameters ``(mu, sig, xi_l, xi_r)``."""
         return [self.params[name] for name in self.PARAM_NAMES[:4]]
 
-    @argsetter('x')
-    @dotweight
-    def pdf(self, x:XTYPE=None) -> np.ndarray:
-        return stacker(x)((self.left.pdf(x), self.right.pdf(x)))
-    
-    @argsetter('x')
-    @dotweight    
-    def cdf(self, x:XTYPE=None) -> np.ndarray:
-        return stacker(x)((self.left.cdf(x), self.right.cdf(x)))
-    
-    @argsetter('x')
-    def sf(self, x:XTYPE=None) -> np.ndarray:
-        return 1 - self.cdf(x)
-    
-    @dotweight
-    def ppf(self, q:XTYPE=None) -> np.ndarray:
+    @property
+    def junctions(self) -> tuple:
+        """``(a_l, a_r)``: the points where the Gaussian body meets each GPD tail."""
+        return self.left.a, self.right.a
+
+    @property
+    def body_mass(self) -> float:
+        """``P(a_l < X < a_r)``, the probability carried by the Gaussian body."""
+        a_l, a_r = self.junctions
+        return float(self.cdf(a_r) - self.cdf(a_l))
+
+    @property
+    def tail_masses(self) -> tuple:
+        """``(P(X < a_l), P(X > a_r))``."""
+        a_l, a_r = self.junctions
+        return float(self.cdf(a_l)), float(self.sf(a_r))
+
+    def _components(self):
+        return (self.left, self.right)
+
+    def _weighted(self, values) -> float:
+        """``sum(p_i * v_i)`` skipping zero weights, so ``0 * inf`` does not poison the result."""
+        with np.errstate(invalid='ignore'):
+            return float(sum(w * v for w, v in zip(self.p, values) if w > 0))
+
+    def _mix(self, name: str, x) -> np.ndarray:
+        x = _as_float_array(x)
+        out = self.p[0] * getattr(self.left, name)(x) + self.p[1] * getattr(self.right, name)(x)
+        return _scalar_or_array(out)
+
+    def _logmix(self, name: str, x) -> np.ndarray:
+        x = _as_float_array(x)
+        with np.errstate(divide='ignore'):
+            logp = np.log(self.p)
+        out = np.logaddexp(
+            logp[0] + getattr(self.left, name)(x),
+            logp[1] + getattr(self.right, name)(x),
+        )
+        return _scalar_or_array(out)
+
+    # ---- distribution functions ---------------------------------------------
+    def pdf(self, x: XTYPE) -> np.ndarray:
+        """Probability density function."""
+        return self._mix('pdf', x)
+
+    def logpdf(self, x: XTYPE) -> np.ndarray:
+        """Log of the density, finite far into either tail."""
+        return self._logmix('logpdf', x)
+
+    def cdf(self, x: XTYPE) -> np.ndarray:
+        """Cumulative distribution function ``P(X <= x)``."""
+        return self._mix('cdf', x)
+
+    def logcdf(self, x: XTYPE) -> np.ndarray:
+        return self._logmix('logcdf', x)
+
+    def sf(self, x: XTYPE) -> np.ndarray:
+        """Survival function ``P(X > x)``, accurate in the far right tail (not ``1 - cdf``)."""
+        return self._mix('sf', x)
+
+    def logsf(self, x: XTYPE) -> np.ndarray:
+        return self._logmix('logsf', x)
+
+    def _quantile(self, q: np.ndarray, upper: bool) -> np.ndarray:
         """
-        Parameters:
-            q: float, iterable of floats 
-                Between [0, 1]
-        """        
-        return stacker(q)((self.left.ppf(q), self.right.ppf(q)))
+        Root of the mixture CDF (``upper=False``: ``cdf(x) = q``) or survival
+        function (``upper=True``: ``sf(x) = q``), vectorised.
 
-    def loglike(self, x=None):
-        "Loglikelihood"
-        return np.log(self.pdf(x))
-
-    @argsetter('x')
-    def nll(self, x:XTYPE=None) -> np.ndarray:
-        """Negative loglikelihood used in machine learning cost functions"""
-        return -np.log(self.pdf(x))
-
-    def rvs(self, 
-        size:Union[int, Iterable[Sequence[int]]]=None, 
-        seed:int=None) -> XTYPE:
+        For every ``q`` the root lies between the two component quantiles, which
+        gives a guaranteed bracket. Safeguarded Newton steps (falling back to
+        bisection) converge in a handful of iterations. Whichever of ``cdf`` and
+        ``sf`` is the smaller probability is the one rooted, so both tails keep
+        full relative precision.
         """
-        Generates random draws
+        q = np.asarray(q, dtype=float)
+        out = np.full(q.shape, np.nan)
+        out[q == 0] = np.inf if upper else -np.inf
+        out[q == 1] = -np.inf if upper else np.inf
+        interior = (q > 0) & (q < 1)
+        if not interior.any():
+            return out
 
-        **Process**
+        qi = q[interior]
+        lower_p = 1.0 - qi if upper else qi          # P(X <= x) at the target
+        upper_p = qi if upper else 1.0 - qi          # P(X > x) at the target
+        use_sf = lower_p > 0.5
 
-        1. Draws randomly from [0,1] uniform distribution
-        2. Calls quantile function for each draw
-
-        Mimics `scipy process <https://github.com/scipy/scipy/blob/28e4811d48c99b7c68e41992eda5cff859c1fa2b/scipy/stats/_distn_infrastructure.py#L1032>`_.
-        """
-        random_state = check_random_state(seed)
-        U = random_state.uniform(size=size)
-        if size is None:
-            U = np.array(U, ndmin=1)
-            Y = self.ppf(U)[0]
+        if upper:
+            x_l, x_r = self.left.isf(qi), self.right.isf(qi)
         else:
-            Y = self.ppf(U)
-        
-        return Y
+            x_l, x_r = self.left.ppf(qi), self.right.ppf(qi)
+        lo = np.minimum(x_l, x_r)
+        hi = np.maximum(x_l, x_r)
 
-    @dotweight
-    def mean(self) -> float:
-        return np.array([self.left.mean(), self.right.mean()])
+        def g(x):
+            # increasing in x, zero at the quantile
+            return np.where(use_sf, upper_p - self.sf(x), self.cdf(x) - lower_p)
 
-    @dotweight
-    def var(self) -> float:
-        return np.array([self.left.var(), self.right.var()])
+        x = 0.5 * (lo + hi)
+        rel_tol = 1e-13
+        for _ in range(200):
+            gx = g(x)
+            below = gx < 0
+            lo = np.where(below, x, lo)
+            hi = np.where(below, hi, x)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                newton = x - gx / self.pdf(x)
+            ok = np.isfinite(newton) & (newton > lo) & (newton < hi)
+            x_new = np.where(ok, newton, 0.5 * (lo + hi))
+            done = (gx == 0) | (np.abs(x_new - x) <= rel_tol * np.maximum(1.0, np.abs(x)))
+            x = np.where(gx == 0, x, x_new)
+            if done.all():
+                break
 
-    def std(self) -> float:
-        return np.sqrt(self.var())
+        out[interior] = x
+        return out
+
+    def ppf(self, q: XTYPE) -> np.ndarray:
+        """
+        Quantile function: ``x`` with ``P(X <= x) = q``.
+
+        The quantile of a mixture is the root of the mixture CDF, not the
+        weighted average of the component quantiles (which 0.0.x returned).
+        """
+        return _scalar_or_array(self._quantile(_as_float_array(q), upper=False))
+
+    def isf(self, p: XTYPE) -> np.ndarray:
+        """Inverse survival function: ``x`` with ``P(X > x) = p``."""
+        return _scalar_or_array(self._quantile(_as_float_array(p), upper=True))
+
+    def loglike(self, x: XTYPE) -> np.ndarray:
+        """Log-likelihood per observation (alias of :meth:`logpdf`)."""
+        return self.logpdf(x)
+
+    def nll(self, x: XTYPE) -> np.ndarray:
+        """Negative log-likelihood per observation."""
+        return -self.logpdf(x)
+
+    # ---- sampling -----------------------------------------------------------
+    def rvs(self,
+        size: Union[int, Iterable[int]] = None,
+        random_state=None,
+        *,
+        seed=None,
+        ) -> XTYPE:
+        """
+        Exact random draws: pick a component with probability ``p``, then invert
+        that component's CDF. (0.0.x pushed uniforms through the averaged
+        ``ppf``, which does not sample the stated density.)
+
+        Parameters
+        ----------
+        size:           int or tuple of ints; ``None`` returns a scalar
+        random_state:   ``None``, int seed, ``numpy.random.Generator`` or ``RandomState``
+        seed:           alias of ``random_state`` kept for 0.0.x callers
+        """
+        rng = _rng(random_state if random_state is not None else seed)
+        shape = () if size is None else tuple(np.atleast_1d(size).astype(int))
+        u = rng.random(shape)
+        from_left = rng.random(shape) < self.p[0]
+        x = np.where(from_left, self.left.ppf(u), self.right.ppf(u))
+        return _scalar_or_array(x)
 
     def std_rvs(self, *args, **kwargs) -> XTYPE:
-        """
-        Generates random variables standardized by dividing by the standard deviation
+        """Draws divided by the standard deviation, so the sample has unit scale. Requires ``xi < 1/2``."""
+        sd = self.std()
+        if not np.isfinite(sd):
+            raise ValueError('standard deviation is infinite: both tail shapes must be below 1/2')
+        return self.rvs(*args, **kwargs) / sd
 
-        Resulting samples should have a standard deviation of 1
-        """
-        return self.rvs(*args, **kwargs) / self.std()
+    # ---- moments ------------------------------------------------------------
+    def mean(self) -> float:
+        """Mean. ``inf`` / ``-inf`` when only the right / left tail has ``xi >= 1``, ``nan`` when both do."""
+        return self._weighted([c.mean() for c in self._components()])
 
+    def var(self) -> float:
+        """Variance ``sum p_i (v_i + m_i^2) - mean^2``; ``inf`` when any weighted tail has ``xi >= 1/2``."""
+        comps = [(w, c) for w, c in zip(self.p, self._components()) if w > 0]
+        if any(c.xi >= 0.5 for _, c in comps):
+            return np.inf
+        second = sum(w * (c.var() + c.mean() ** 2) for w, c in comps)
+        return float(second - self.mean() ** 2)
+
+    def std(self) -> float:
+        """Standard deviation; ``inf`` when the variance is."""
+        return float(np.sqrt(self.var()))
+
+    def stats(self) -> tuple:
+        """``(mean, var)``"""
+        return self.mean(), self.var()
+
+    def expected_shortfall(self, q: XTYPE, tail: str = 'left') -> np.ndarray:
+        """
+        Expected shortfall at tail probability ``q``.
+
+        ``tail='left'``:  ``E[X | X <= ppf(q)]``, the usual loss-side measure for returns.
+        ``tail='right'``: ``E[X | X >= isf(q)]``; ``inf`` when ``xi_r >= 1``.
+        """
+        q = _as_float_array(q)
+        if tail == 'left':
+            x = self._quantile(q, upper=False)
+            partial = [c.lower_partial_mean(x) for c in self._components()]
+        elif tail == 'right':
+            x = self._quantile(q, upper=True)
+            partial = [c.upper_partial_mean(x) for c in self._components()]
+        else:
+            raise ValueError("`tail` must be 'left' or 'right'")
+        with np.errstate(invalid='ignore', divide='ignore'):
+            num = sum(w * np.asarray(v, float) for w, v in zip(self.p, partial) if w > 0)
+            out = np.where((q > 0) & (q <= 1), num / q, np.nan)
+        return _scalar_or_array(out)
+
+    es = expected_shortfall
+
+    # ---- estimation ---------------------------------------------------------
     @staticmethod
-    def fit(values, xi_l:float=None, xi_r:float=None) -> PhatFit:
+    def fit(values, xi_l: float = None, xi_r: float = None) -> 'PhatFit':
         """
-        Generates standard log-likelihood fit to Phat distribution
+        Maximum-likelihood fit via ``statsmodels``.
 
-        Returns:
-            PhatFit
+        With ``xi_l`` and ``xi_r`` given only ``(mu, sig)`` are estimated (the
+        two-stage estimator); otherwise all four parameters are.
+
+        Returns
+        -------
+        ``statsmodels`` results object (``params``, ``bse``, ``llf``, ...)
         """
+        try:
+            import statsmodels.api as sm
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError('Phat.fit requires statsmodels: pip install "phat-tails[fit]"') from exc
+        values = np.asarray(values, dtype=float)
         exog = sm.add_constant(np.zeros_like(values), prepend=True)
         phatfit = PhatFit(values, exog, xi_l, xi_r)
+        return phatfit.fit()
 
-        return phatfit.fit()  
 
 class PhatStack(Phat):
     """
-    Weighted model of multiple Phat distributions. 
-    
-    This is NOT a mixture model. Used only to generate a two dimensional set
-    of random variables that are consistent in a single component
-    distribution across the second dimension.
-    
+    Weighted collection of Phat distributions used to generate a 2-d array of
+    draws in which every row comes from a single component.
+
+    This is NOT a mixture model. Along the first axis the rows are divided
+    between the components in proportion to ``p``; along the second axis each
+    row is drawn from one component only, so a single regime governs each
+    simulated path.
+
     Parameters
-    -----------
-    phats:  iterable or args Phat distributions
-    p:      iterable of floats; represents weighting of each Phat distribution
-            in the final model. Must sum to 1.
+    ----------
+    phats:  Phat distributions (as separate arguments or one iterable)
+    p:      weights, one per distribution, summing to 1
 
     Attributes
-    -----------
-    n_comps:      int; number of component phat distributions
-    
-    Methods
-    --------
-    rvs
-    
-    """    
+    ----------
+    n_comps:    number of component distributions
+    """
+
     def __init__(
-        self, 
-        *phats:Phat,
-        p:Iterable=None
+        self,
+        *phats: Phat,
+        p: Iterable = None
         ) -> None:
-        """
-        """
         if len(phats) == 1:
             phats = phats[0]
-        
-        if len(phats) != len(p):
-            txt = 'Length of probabilities does not match number' 
-            txt += f' of distributions: {len(phats)} v {len(p)}'
+
+        if p is None or len(phats) != len(p):
+            txt = 'Length of probabilities does not match number'
+            txt += f' of distributions: {len(phats)} v {None if p is None else len(p)}'
             raise AssertionError(txt)
-        
+
         self.n_comps = len(phats)
         self.phats = phats
         self.p = arrayarize(p)
 
-    def rvs(self, 
-        size:Iterable[int]=None, 
-        seed:int=None,
-        return_splits:bool=False,
+    def rvs(self,
+        size: Iterable[int] = None,
+        random_state=None,
+        return_splits: bool = False,
+        *,
+        seed=None,
         ) -> XTYPE:
         """
-        Generates array of random draws.
-        
-        ***IMPORTANT***
-        Accepts only 2D m x n array. Draws are taken proportionately from
-        the component Phat distributions ONLY along the first axis. Along the 
-        second axis, draw are taken ONLY from the specific Phat distribution 
-        isolated in the first axis.
-        
-        This ensures that only one distribution regime impacts the time series
-        over time.
-        
-        Where the required iterations, m, does not divide evenly into the
-        proportions, the remainders are added to certain distributions
+        Array of random draws, shape ``size = (m, n)`` only.
 
-        Params
-        -------
-        size:           iterable; m x n. Only two dimensions allowed.
-        seed:           int; initialize with specific random state for replication
-        return_splits:  bool; optional return of the number of m iterations
-                        returned for each component distribution
+        Rows are allocated to components as ``floor(m * p)``; remainders go to
+        the first components. Each component's rows are drawn with its own
+        exact :meth:`Phat.rvs` from one shared random generator.
+
+        Parameters
+        ----------
+        size:           ``(m, n)``
+        random_state:   ``None``, int seed, ``numpy.random.Generator`` or ``RandomState``
+        return_splits:  also return the number of rows drawn from each component
+        seed:           alias of ``random_state`` kept for 0.0.x callers
         """
-        if len(size) != 2:
+        if size is None or len(size) != 2:
             raise AssertionError('Size must be 2D m x n array')
+        rng = _rng(random_state if random_state is not None else seed)
 
         iters = np.floor(size[0] * self.p).astype(int)
         rmdr = size[0] - iters.sum()
-        iters[:rmdr] += np.ones(rmdr, dtype=int)
-        
+        iters[:rmdr] += 1
+
         Y = np.zeros(size)
-        st = 0
-        for i, end in enumerate(iters):
-            Y[st: st+end] = self.phats[i].rvs((end, size[1]), seed=seed)
-            st += end
-        
+        start = 0
+        for phat, end in zip(self.phats, iters):
+            if end:
+                Y[start:start + end] = phat.rvs((end, size[1]), random_state=rng)
+            start += end
+
         if return_splits:
             return Y, iters
-        else:
-            return Y
-            
+        return Y
