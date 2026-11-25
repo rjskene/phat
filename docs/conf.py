@@ -22,7 +22,8 @@ copyright = u'2021 Ryan Skene. All rights reserved.'
 author = 'rskene'
 
 # The full version, including alpha/beta/rc tags
-release = '0.0.11'
+from importlib.metadata import version as _pkg_version
+release = _pkg_version('phat-tails')
 
 # -- General configuration ---------------------------------------------------
 
@@ -51,7 +52,7 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 #
 html_theme = 'sphinx_book_theme'
 html_theme_options = {
-    'repository_url': 'https://github.com/spatialaudio/nbsphinx',
+    'repository_url': 'https://github.com/rjskene/phat',
     'use_repository_button': True,
     'use_issues_button': True,
     'use_edit_page_button': True,

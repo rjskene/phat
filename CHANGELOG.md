@@ -8,6 +8,11 @@ change.
 ## [Unreleased]
 
 ### Fixed
+- `Garchcaster.dist` raised nothing when no distribution was set (the
+  `NotImplementedError` was constructed but not raised) and
+  `Garchcaster` kept `resids[:-maxlag:]` (everything but the last `maxlag`
+  values) as its residual history when `use_backcast=False`; it now keeps the
+  last `maxlag` residuals.
 - `Phat.ppf` returned the weighted average of the two component quantile
   functions, which is not the quantile of a mixture. It is now the root of the
   mixture CDF (vectorised, safeguarded Newton with a guaranteed bracket). For
@@ -47,6 +52,32 @@ change.
   non-negative weights summing to 1.
 
 ### Changed
+- Packaging moved to a single `pyproject.toml` (`setup.py`, `setup.cfg`,
+  `requirements.txt` and `docs/_dev_requirements.txt` removed). Core
+  dependencies are `numpy>=1.25` and `scipy>=1.11` only; `requires-python`
+  is `>=3.11` (the oldest CPython still supported upstream). Everything else
+  is an extra: `fit` (statsmodels), `speed` (numba, tqdm), `garch` (arch,
+  pandas), `plot` (matplotlib), `learn` (TensorFlow stack), `docs`, `dev`,
+  `all`. `pmdarima` is no longer a dependency; a fitted `pmdarima.ARIMA` is
+  still accepted by `Garchcaster` through duck typing.
+- Project URL corrected to `https://github.com/rjskene/phat` and the licence
+  classifier to MIT, matching `LICENSE`.
+- `phat.tseries` and `phat.bootstrap` import without Numba, `arch`, tqdm,
+  pandas or matplotlib: the JIT decorators fall back to plain Python, the
+  `arch` `isinstance` checks are skipped, the progress bar becomes a plain
+  `range`, and matplotlib is imported inside the plotting methods.
+- `Garchcaster` with no innovation distribution draws Gaussian innovations with
+  `numpy.random.default_rng(seed)` instead of a Numba loop that ignored `seed`.
+- `PhatFit` moved to the new module `phat.fit`, which is the only module that
+  imports `statsmodels`; `phat.dists.PhatFit` and `phat.PhatFit` still resolve
+  to it lazily.
+- `two_tailed_hill_double_bootstrap` accepts any array-like, no longer calls
+  `np.seterr` globally (uses `np.errstate`), and no longer uses a mutable
+  default for `pbar_kwargs`. Its docstring credits the `tail-estimation`
+  code (Voitalov et al., MIT) it was adapted from.
+- `.readthedocs.yaml` builds on Python 3.12 with the `docs` extra;
+  `docs/conf.py` reads the version from package metadata and points the
+  repository link at `rjskene/phat`.
 - Distribution methods return NumPy scalars for scalar input and arrays of the
   input's shape otherwise (SciPy convention). Previously a scalar input gave a
   shape-`(1,)` array, so `dist.cdf(3)[0]` must become `dist.cdf(3)`.

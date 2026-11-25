@@ -1,28 +1,56 @@
 """
-Numpy-based functions for estimating tail index
-via the Hill Double Bootstrap method.
+NumPy-based functions for estimating the tail index via the Hill double
+bootstrap (Danielsson, de Haan, Peng and de Vries, 2001; Qi, 2008).
 
-Process is effectively detailed in Voitalov 2019:
-https://journals.aps.org/prresearch/pdf/10.1103/PhysRevResearch.1.033034
+Attribution
+-----------
+The functions in this module are adapted from ``tail-estimation`` by Ivan
+Voitalov (https://github.com/ivanvoitalov/tail-estimation), released under
+the MIT License, which accompanies the paper
 
-See Documentation for more.
+    Voitalov, van der Hoorn, van der Hofstad and Krioukov, "Scale-free
+    networks well done", Physical Review Research 1, 033034 (2019),
+    https://doi.org/10.1103/PhysRevResearch.1.033034
+
+The two-tailed wrapper :func:`two_tailed_hill_double_bootstrap` splits the
+sample at its mean and applies the procedure to each side.
+
+Numba, when installed, compiles the inner loops; tqdm, when installed, shows a
+progress bar. Neither is required.
 """
 
 from typing import Iterable, Union, Tuple
 import numpy as np
 
-import numba as nb
-from tqdm.auto import trange
+try:
+    import numba as nb
+    _njit = nb.njit
+except ImportError:  # pragma: no cover - exercised in the core-only CI job
+    nb = None
 
-@nb.njit
+    def _njit(*args, **kwargs):
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return args[0]
+
+        def deco(func):
+            return func
+        return deco
+
+try:
+    from tqdm.auto import trange
+except ImportError:  # pragma: no cover
+    def trange(n, **kwargs):
+        return range(n)
+
+@_njit
 def A_dani(n1, k1):
     return (np.log(k1)/(2*np.log(n1) - np.log(k1)))**(2*(np.log(n1) - np.log(k1))/(np.log(n1)))
 
-@nb.njit
+@_njit
 def A_qi(n1, k1):
     return (1 - (2*(np.log(k1) - np.log(n1))/(np.log(k1))))**(np.log(k1)/np.log(n1) - 1)
 
-@nb.njit
+@_njit
 def moments_dbs_prefactor(xi_n, n1, k1):
     """ 
     Function to calculate pre-factor used in moments
@@ -96,22 +124,22 @@ def moments_dbs_prefactor(xi_n, n1, k1):
     prefactor = (a/b)**(1./(1. - 2*rho))
     return prefactor
 
-@nb.njit
+@_njit
 def hill_est_for_alpha(k, y):
     return k / (np.cumsum(np.log(y[:-1])) - k*np.log(y[:-1]))
 
-@nb.njit
+@_njit
 def hill_est_for_xi(k,y):
     return np.cumsum(np.log(y[:-1]))/k - np.log(y[1:])
 
-@nb.njit
+@_njit
 def second_moment(k, y):
     t1 = np.cumsum(np.log(y[:-1])**2) / k 
     t2 = 2*np.cumsum(np.log(y[:-1]))*np.log(y[1:]) / k
     t3 = np.log(y[1:])**2
     return t1 - t2 + t3
 
-@nb.njit
+@_njit
 def third_moment(k,y):
     """
     """
@@ -122,17 +150,17 @@ def third_moment(k,y):
     M3 = t1 - t2 + t3 - t4
     return M3
 
-@nb.njit
+@_njit
 def amse(M1, M2):
     return (M2 - 2*M1**2)**2
 
-@nb.njit
+@_njit
 def hill_amse(k,y):
     M1 = hill_est_for_xi(k,y)
     M2 = second_moment(k,y)
     return amse(M1,M2)    
 
-@nb.njit
+@_njit
 def moments_amse(k, y):
     M1 = hill_est_for_xi(k, y)
     M2 = second_moment(k,y)    
@@ -141,7 +169,7 @@ def moments_amse(k, y):
     xi_3 = np.sqrt(0.5*M2) + 1 - (2/3)*(1 / (1 - M1*M2/M3))
     return (xi_2 - xi_3)**2
 
-@nb.njit
+@_njit
 def finder_loop(y, n, r, style='hill'):
     amses = np.zeros(n-1)
     for i in range(r):
@@ -206,21 +234,38 @@ def two_tailed_hill_double_bootstrap(
     values:Iterable[float], 
     iters:int=10, 
     return_mean:bool=True,
-    pbar_kwargs:dict={},
+    pbar_kwargs:dict=None,
     ) -> Union[Tuple[Iterable], Tuple[float]]:
-    
+    """
+    Hill double-bootstrap estimate of the tail shape ``xi`` on each side of the
+    sample mean.
+
+    Parameters
+    ----------
+    values:         1-d sample
+    iters:          number of independent double-bootstrap runs to average
+    return_mean:    return the mean over runs (``True``) or every run
+    pbar_kwargs:    keyword arguments for the tqdm progress bar
+
+    Returns
+    -------
+    ``(xi_left, xi_right)`` as floats, or as arrays of length ``iters``
+    """
+    values = np.asarray(values, dtype=float)
+    pbar_kwargs = {} if pbar_kwargs is None else pbar_kwargs
+
     left = values[values < values.mean()]
     left = np.sort(-left)[::-1]
 
     right = values[values > values.mean()]
     right = np.sort(right)[::-1]
 
-    np.seterr(all='ignore')
     shl = np.zeros(iters)
     shr = np.zeros(iters)
-    for i in trange(iters, **pbar_kwargs):
-        shl[i] = dbl_bs(left, t=.5, r=500, style='hill', A_type='dani')
-        shr[i] = dbl_bs(right, t=.5, r=500, style='hill', A_type='dani')
+    with np.errstate(all='ignore'):
+        for i in trange(iters, **pbar_kwargs):
+            shl[i] = dbl_bs(left, t=.5, r=500, style='hill', A_type='dani')
+            shr[i] = dbl_bs(right, t=.5, r=500, style='hill', A_type='dani')
     
     if return_mean:
         return shl.mean(), shr.mean()

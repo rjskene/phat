@@ -3,50 +3,48 @@ Custom functionality for generating ARMA-GARCH time-series forecasts.
 """
 from __future__ import annotations
 
-from typing import Iterable, Union, Tuple, TYPE_CHECKING
+from typing import Iterable, Union, Tuple
 import warnings
 import numpy as np
-import pandas as pd
-import scipy
-import matplotlib.pyplot as plt
-
-import numba as nb
+import scipy.stats
 
 from phat.utils import argsetter, arrayarize, PriceSim
-from phat.dists import Phat
+from phat.dists import Phat, _rng
 
-import pmdarima
-import arch
+# Optional accelerators and model packages. Everything below degrades gracefully:
+# without Numba the forecast loop runs in pure Python; without `arch` only the
+# array-based constructor is available.
+try:
+    import numba as nb
+    _njit = nb.njit
+except ImportError:  # pragma: no cover - exercised in the core-only CI job
+    nb = None
+
+    def _njit(*args, **kwargs):
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return args[0]
+
+        def deco(func):
+            return func
+        return deco
+
+try:
+    from arch.univariate.base import ARCHModelResult as _ARCHModelResult
+    from arch.univariate.mean import ConstantMean as _ConstantMean
+except ImportError:  # pragma: no cover
+    _ARCHModelResult = ()   # isinstance(x, ()) is always False
+    _ConstantMean = ()
 
 ALLOWED_DISTS = Union[Phat, scipy.stats._distn_infrastructure.rv_frozen]
 
+
+def _is_pmdarima_arima(obj) -> bool:
+    """Duck-typed check for a fitted ``pmdarima.ARIMA`` without importing pmdarima."""
+    return hasattr(obj, 'order') and callable(getattr(obj, 'params', None)) and hasattr(obj, 'arima_res_')
+
+
 ###### Numba helper functions to improve GarchForecast speed ######
-@nb.njit(parallel=True, cache=True)
-def random_normal(
-    iters:int=1, 
-    periods:int=252
-    ) -> np.ndarray:
-    """
-    Loop creates 2d standard normal residual terms. Numba is much faster
-    producing random 2d arrays in this fashion than via the `size` parameter
-
-    Params
-    -------
-    iters:      int; number of separate simulations to run
-    periods:    int; number of periods over which to run simulation
-
-    Returns
-    --------
-    rvs:        np.ndarray of random draws from standard normal distribtion
-    """
-    rvs = np.zeros(shape=(iters, periods), dtype=np.float64)
-    for i in nb.prange(iters):
-        for j in nb.prange(periods):
-            rvs[i, j] = np.random.normal()
-
-    return rvs
-
-@nb.njit(cache=True)
+@_njit(cache=True)
 def _step_sum(
     params:Iterable[float], 
     values:Iterable[float]
@@ -70,7 +68,7 @@ def _step_sum(
 
     return np.sum(sums)    
 
-@nb.njit(cache=True)
+@_njit(cache=True)
 def _arma_one_step(
     y:np.ndarray, 
     resids:np.ndarray, 
@@ -99,7 +97,7 @@ def _arma_one_step(
 
     return constant + ar + ma
 
-@nb.njit(cache=True)
+@_njit(cache=True)
 def _garch_one_step(
     vols:np.ndarray,
     resids:np.ndarray,
@@ -175,7 +173,7 @@ class PROCESSMIXIN:
         -------
         order:      tuple; 2x1 tuple with ARMA order (p,q) or GARCH order (m,n)
         """
-        if any([params is None, isinstance(params, pd.Series) and params.empty, not params.any()]):
+        if params is None or getattr(params, 'empty', False) or not np.any(params):
             first_order = second_order = 0
         else:
             first_order = len(params) // 2 + len(params) % 2
@@ -318,9 +316,9 @@ class GarchcastResults:
     def plot(
         self, 
         kind:str='vol', 
-        ax:Union[plt.Axes, Iterable[plt.Axes]]=None, 
+        ax:Union['plt.Axes', Iterable['plt.Axes']]=None, 
         *args, **kwargs
-        ) -> Union[plt.Axes, Iterable[plt.Axes]]:
+        ) -> Union['plt.Axes', Iterable['plt.Axes']]:
         """
         Main method used to generate plots
 
@@ -333,6 +331,7 @@ class GarchcastResults:
         -------
         ax:      matplotlib Axes object(s)
         """
+        import matplotlib.pyplot as plt
         multi_ax = ['price']
         if ax is None and kind not in multi_ax:
             fig, ax = plt.subplots(1,1,figsize=(10,6))
@@ -367,14 +366,16 @@ class GarchcastResults:
 
         return ax
 
-    def _plot_vol(self, ax:plt.Axes, *args, **kwargs) -> Union[plt.Axes, Iterable[plt.Axes]]:
+    def _plot_vol(self, ax:'plt.Axes', *args, **kwargs) -> Union['plt.Axes', Iterable['plt.Axes']]:
+        import matplotlib.pyplot as plt
         ax.plot((self.vols).mean(axis=0))
         ax.set_xlabel('Days')
         plt.suptitle('Phat-GARCH Forecast: Conditional Volatility')
 
         return ax
         
-    def _plot_var(self, ax, *args, **kwargs) -> Union[plt.Axes, Iterable[plt.Axes]]:
+    def _plot_var(self, ax, *args, **kwargs) -> Union['plt.Axes', Iterable['plt.Axes']]:
+        import matplotlib.pyplot as plt
         ax.plot((self.vols**2).mean(axis=0), *args, **kwargs)
         ax.set_xlabel('Days')
         plt.suptitle('Phat-GARCH Forecast: Conditional Variance')
@@ -384,9 +385,9 @@ class GarchcastResults:
     def _plot_price(self, 
         p:float, 
         n:int, 
-        axes:Iterable[plt.Axes], 
+        axes:Iterable['plt.Axes'], 
         *args, **kwargs
-        ) -> Iterable[plt.Axes]:
+        ) -> Iterable['plt.Axes']:
         sim = self._make_sim(p=p)
         
         all_axes = []
@@ -401,9 +402,9 @@ class GarchcastResults:
 
     def _plot_end_price(self, 
         p:float, 
-        ax:plt.Axes, 
+        ax:'plt.Axes', 
         *args, **kwargs
-        ) -> Tuple[plt.Axes, np.ndarray, np.ndarray]:
+        ) -> Tuple['plt.Axes', np.ndarray, np.ndarray]:
         sim = self._make_sim(p=p)
         _, P, (ax, bins) = sim.sims(rets=1 + self.values/100, ax=ax, show_chart=True, *args, **kwargs)
         return ax, P, bins
@@ -443,8 +444,8 @@ Params:
     GARCH_HAS_MEAN_PROCESS = False
 
     def __init__(self,
-        garch:Union[arch.univariate.base.ARCHModelResult, Iterable[float]]=None,
-        arma:Union[pmdarima.arima.arima.ARIMA, Iterable[float]]=None,
+        garch:Union['ARCHModelResult', Iterable[float]]=None,
+        arma:Union['pmdarima.ARIMA', Iterable[float]]=None,
         y:Iterable[float]=None,
         vols:Iterable[float]=None,
         resids:Iterable[float]=None,
@@ -455,12 +456,12 @@ Params:
         use_backcast:bool=True,
         ):
         ### First, set self.mean
-        if isinstance(arma, pmdarima.arima.arima.ARIMA):
+        if _is_pmdarima_arima(arma):
             m, _, n = arma.order
             mean_order = (m,n)
             mean_params = arma.params()[:5]
-        elif isinstance(garch, arch.univariate.base.ARCHModelResult):
-            if isinstance(garch.model, arch.univariate.mean.ConstantMean):
+        elif isinstance(garch, _ARCHModelResult):
+            if isinstance(garch.model, _ConstantMean):
                 mean_order = (0, 0)
                 mean_params = garch.params[:1]
             else:
@@ -474,7 +475,7 @@ Params:
         self.mean = MEAN(mean_params, order=mean_order)
 
         ### Second, set self.vol
-        if isinstance(garch, arch.univariate.base.ARCHModelResult):
+        if isinstance(garch, _ARCHModelResult):
             if hasattr(garch.model.volatility, 'p'):
                 vol_order = (garch.model.volatility.p, garch.model.volatility.q)
             else:
@@ -499,7 +500,7 @@ Params:
         self.maxlag = max(self.order)
 
         ### Third, assign values
-        if isinstance(garch, arch.univariate.base.ARCHModelResult):
+        if isinstance(garch, _ARCHModelResult):
             if any([y is not None, vols is not None, resids is not None]):
                 raise ValueError('If `garch` is ARCHModelResult do not provide `y`, `vol`, or `resids`')
             else:
@@ -516,14 +517,14 @@ Params:
    
         self.y_hist = y[-self.maxlag:]
         self.vols_hist = vols[-self.maxlag:]
-        self.resids_hist = self._backcast(resids, self.maxlag) if use_backcast else resids[:-self.maxlag:]
+        self.resids_hist = self._backcast(resids, self.maxlag) if use_backcast else resids[-self.maxlag:]
         
         self._dist = dist
     
     @property
     def dist(self) -> ALLOWED_DISTS:
         if self._dist is None:
-            NotImplementedError('You must pass `dist` parameter')
+            raise NotImplementedError('You must pass `dist` parameter')
         else:
             return self._dist
 
@@ -551,7 +552,7 @@ Params:
         innovs:         np.ndarray
         """
         if self._dist is None and dist is None:
-            innovs = random_normal(iters, periods)
+            innovs = _rng(seed).standard_normal((iters, periods))
         else:
             dist = dist if dist is not None else self._dist
             rvfunc = dist.std_rvs if hasattr(dist, 'std_rvs') else dist.rvs
@@ -569,7 +570,7 @@ Params:
         return np.repeat(backcast, maxlag)
 
     @staticmethod
-    @nb.njit(cache=True)
+    @_njit(cache=True)
     def _forecast_looper(
         y:np.ndarray,
         vols:np.ndarray,
