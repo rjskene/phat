@@ -27,7 +27,8 @@ class TestGroup:
 
     @pytest.fixture
     def cbl(self, l_params):
-        return ph.CarBenHybrid(*l_params)
+        xi, mu, sig = l_params          # l_params carries the 0.0.x "negative xi = left" form
+        return ph.CarBenHybrid(-xi, mu, sig, rtail=False)
 
     def is_right(self, cb):
         return isinstance(cb, ph.dists.CarBenRight)

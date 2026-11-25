@@ -13,6 +13,9 @@ CASES = [
     (2, 2, 0.2, 0.2),
     (-1.5, 0.7, 0.0, 0.45),
     (0.3, 3.0, 0.6, 0.05),
+    # bounded GPD tails (-1 < xi < 0)
+    (0.3, 1.5, -0.3, 0.2),
+    (0.0, 1.0, -0.2, -0.5),
 ]
 
 
@@ -50,8 +53,13 @@ def test_ppf_inverts_cdf(pair):
     q = np.array([1e-6, 1e-4, 0.01, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99, 1 - 1e-4, 1 - 1e-6])
     x = dist.ppf(q)
     np.testing.assert_allclose(dist.cdf(x), q, rtol=1e-9, atol=1e-14)
+    # round trip through whichever of cdf / sf is the small probability, so the
+    # check is well conditioned far out on both sides
     xs = np.linspace(dist.mu - 6 * dist.sig, dist.mu + 6 * dist.sig, 31)
-    np.testing.assert_allclose(dist.ppf(dist.cdf(xs)), xs, rtol=1e-9, atol=1e-9)
+    median = dist.ppf(0.5)
+    lo, hi = xs[xs <= median], xs[xs > median]
+    np.testing.assert_allclose(dist.ppf(dist.cdf(lo)), lo, rtol=1e-9, atol=1e-9)
+    np.testing.assert_allclose(dist.isf(dist.sf(hi)), hi, rtol=1e-9, atol=1e-9)
 
 
 def test_ppf_matches_oracle(pair):
@@ -79,6 +87,8 @@ def test_isf_is_upper_quantile(pair):
 
 def test_sf_accurate_in_far_tail(pair):
     dist, oracle = pair
+    if min(dist.xi_l, dist.xi_r) < 0:
+        pytest.skip('a bounded GPD tail has no mass this far out')
     # 1 - cdf(x) is exactly 0 out here; sf must still carry the GPD tail.
     x = dist.mu + dist.sig * np.array([1e3, 1e5, 1e7])
     sf = dist.sf(x)
@@ -227,9 +237,10 @@ def test_parameter_validation():
     with pytest.raises(ValueError):
         ph.Phat(0, -1, 0.2, 0.25)
     with pytest.raises(ValueError):
-        ph.Phat(0, 1, -0.2, 0.25)
+        ph.Phat(0, 1, -1.0, 0.25)       # the GPD shape must exceed -1
     with pytest.raises(ValueError):
-        ph.Phat(0, 1, 0.2, -0.25)
+        ph.Phat(0, 1, 0.25, -1.5)
+    assert ph.Phat(0, 1, -0.2, 0.25).xi_l == -0.2   # a bounded left tail is a valid shape
 
 
 def test_scalar_in_scalar_out():
@@ -260,3 +271,29 @@ def test_phatstack_rvs_splits_and_regimes():
     a = stack.rvs((10, 3), random_state=7)
     b = stack.rvs((10, 3), random_state=7)
     np.testing.assert_array_equal(a, b)
+
+
+def test_bounded_tail_ends_at_the_gpd_endpoint():
+    # xi < 0: the GPD tail of that component stops at a + b/|xi|. The mixture keeps
+    # the Gaussian remnant of the other component, so the density beyond the
+    # endpoint is that remnant alone.
+    dist = ph.Phat(0.0, 1.0, 0.2, -0.5)
+    end = dist.right.a + dist.right.b / 0.5
+    assert dist.right.pdf(end + 1e-9) == 0 and dist.right.sf(end + 1e-9) == 0
+    assert dist.right.pdf(end - 1e-3) > 0
+    x = end + 0.5
+    assert dist.pdf(x) == pytest.approx(dist.p[0] * dist.left.pdf(x), rel=1e-12)
+    assert dist.sf(x) == pytest.approx(dist.p[0] * dist.left.sf(x), rel=1e-12)
+    draws = dist.right.rvs(50_000, random_state=np.random.default_rng(5))
+    assert draws.max() <= end
+
+
+@pytest.mark.parametrize('xi', [0.3, 0.0, -0.3, -0.9])
+def test_component_quantile_limits(xi):
+    right, left = ph.CarBenRight(xi, 0.5, 2.0), ph.CarBenLeft(xi, 0.5, 2.0)
+    right_end = np.inf if xi >= 0 else right.a + right.b / abs(xi)
+    left_end = -np.inf if xi >= 0 else left.a - left.b / abs(xi)
+    assert right.ppf(0.0) == -np.inf and right.isf(1.0) == -np.inf
+    assert right.ppf(1.0) == pytest.approx(right_end) and right.isf(0.0) == pytest.approx(right_end)
+    assert left.ppf(1.0) == np.inf and left.isf(0.0) == np.inf
+    assert left.ppf(0.0) == pytest.approx(left_end) and left.isf(1.0) == pytest.approx(left_end)

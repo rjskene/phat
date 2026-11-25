@@ -38,8 +38,10 @@ change.
 - `CarBenHybrid(xi=...)` by keyword raised `IndexError` because the
   positional check `len(args) >= 0` was always true; a negative keyword `xi`
   also never flipped sign. Keyword and positional construction now agree, and
-  integer / NumPy scalars are accepted for `xi`. The sign-of-`xi` convention
-  itself is unchanged (owner decision pending).
+  integer / NumPy scalars are accepted for `xi`.
+- `CarBenRight.isf(1.0)` (and so `CarBenLeft.ppf(1.0)`) could return a large
+  finite number instead of `-inf` / `inf` through rounding in
+  `gamma * p - Phi(s)`; the body branch is now `body.ppf(gamma * (1 - p))`.
 - `GarchcastResults.plot(kind='price')` and `plot(kind='end_price')` never
   worked: `p` and `n` were read from the wrong positions (`NameError` when
   omitted) and the `show_chart` flag was dropped by `argsetter`, so the price
@@ -47,7 +49,7 @@ change.
   `p=` (starting price) and `n=` (paths) as keywords.
 
 ### Added
-- Test suite (`pytest`, 165 tests): density integrates to one, CDF monotone with
+- Test suite (`pytest`, 196 tests): density integrates to one, CDF monotone with
   the right limits, `ppf(cdf(x)) = x`, sampler Kolmogorov-Smirnov against the
   model CDF, moments and expected shortfall against quadrature, location-scale
   behaviour, C1 continuity at the junctions, moment-existence rules, the
@@ -89,6 +91,28 @@ change.
   paths reproducibly.
 
 ### Changed
+- **Sign convention of `xi` (breaking, with a one-release shim).** `xi` is
+  now always the shape of the generalized Pareto tail: positive for a heavy
+  tail, zero for an exponential tail, `-1 < xi < 0` for a bounded tail. The
+  side is chosen separately, by `CarBenRight` / `CarBenLeft` or by
+  `CarBenHybrid(xi, mu, sig, rtail=True|False)`.
+  - In 0.0.x `CarBenHybrid(-0.25, mu, sig)` meant "left tail with shape
+    0.25". That call still returns the same object in this release but emits
+    a `FutureWarning`; in the next release it will be a bounded *right* tail.
+    Write `CarBenHybrid(0.25, mu, sig, rtail=False)` or
+    `CarBenLeft(0.25, mu, sig)`.
+  - With `rtail` given, a negative `xi` is already the bounded tail on that
+    side. `CarBenHybrid(-0.25, mu, sig, rtail=False)` used to raise
+    `ValueError` and `CarBenHybrid(-0.25, mu, sig, rtail=True)` used to
+    return a left tail with shape 0.25.
+  - `Phat(mu, sig, xi_l, xi_r)` accepts `xi_l, xi_r > -1` (previously
+    `>= 0`). Every existing call is unchanged. A component with a negative
+    shape has a GPD tail that ends at `a + b/|xi|`; the mixture stays
+    supported on the whole line through the other component's Gaussian body.
+    All methods are checked against the quadrature oracle for bounded tails.
+    `Phat.fit` still searches `0 <= xi <= 10`.
+  - `CarBenHybrid` has an explicit signature `(xi, mu, sig=None, a=None,
+    rtail=True)` instead of `*args, **kwargs`.
 - Packaging moved to a single `pyproject.toml` (`setup.py`, `setup.cfg`,
   `requirements.txt` and `docs/_dev_requirements.txt` removed). Core
   dependencies are `numpy>=1.25` and `scipy>=1.11` only; `requires-python`

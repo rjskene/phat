@@ -8,6 +8,7 @@ distributions are for illustration purposes in the docs.
 """
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterable, Sequence
 from typing import Any, Union
 
@@ -378,7 +379,8 @@ class CarBenRight(CarBenBase):
             out = np.where(
                 p < self.tail_mass,
                 self.tail.isf(self.gamma * p),
-                self.body.isf(self.gamma * p - self._phi_s),
+                # body.isf(gamma*p - Phi(s)) rewritten so p = 1 gives exactly -inf
+                self.body.ppf(self.gamma * (1.0 - p)),
             )
         return _scalar_or_array(out)
 
@@ -527,48 +529,54 @@ class CarBenLeft(CarBenBase):
         return _scalar_or_array(2.0 * self.mu * self._mirror.cdf(r) - self._mirror.lower_partial_mean(r))
 
 
+_RTAIL_UNSET: Any = object()
+
+
 class CarBenHybrid:
     """
-    Light wrapper that reads the arguments and returns either a
-    :class:`CarBenLeft` or a :class:`CarBenRight`.
+    Factory that returns a :class:`CarBenRight` or a :class:`CarBenLeft`.
 
-    Sign convention (kept from 0.0.x; see CHANGELOG):
+    Parameters
+    ----------
+    xi:     shape of the generalized Pareto tail, ``xi > -1``: positive for a
+            heavy (power-law) tail, zero for an exponential tail, negative for
+            a bounded tail that ends at ``a + b / |xi|`` (``a - b / |xi|`` on
+            the left). The sign of ``xi`` says nothing about the side.
+    mu:     location of the Gaussian body
+    sig:    scale of the Gaussian body (or give the junction ``a`` instead)
+    a:      junction between body and tail
+    rtail:  ``True`` (default) for a right tail, ``False`` for a left tail
 
-    * ``xi >= 0`` and ``rtail=True`` (default) -> ``CarBenRight``
-    * ``xi >= 0`` and ``rtail=False``          -> ``CarBenLeft``
-    * ``xi < 0``                                -> ``CarBenLeft`` with ``xi = -xi``
-
-    Passing a negative ``xi`` together with ``rtail=False`` is an error.
-    ``xi`` may be given positionally or by keyword; ``rtail`` may be given as
-    the fifth positional argument or by keyword.
+    .. versionchanged:: 0.1
+       ``xi`` is always the tail shape. In 0.0.x a negative ``xi`` meant "left
+       tail with shape ``|xi|``". For one release that reading is kept, with a
+       ``FutureWarning``, when ``xi < 0`` is passed **without** ``rtail``;
+       pass ``rtail=False`` and a positive ``xi`` instead. With ``rtail``
+       given, a negative ``xi`` is already a bounded tail on that side.
     """
 
-    def __new__(cls, *args, **kwargs):
-        args = list(args)
-        xi_is_arg = len(args) >= 1
-        if not xi_is_arg and 'xi' not in kwargs:
-            raise TypeError('CarBenHybrid requires `xi`')
-        xi = args[0] if xi_is_arg else kwargs['xi']
-
-        if len(args) >= 5:
-            rtail = args.pop(4)
-        else:
-            rtail = kwargs.pop('rtail', True)
-
+    def __new__(cls,
+        xi: float,
+        mu: float,
+        sig: float | None = None,
+        a: float | None = None,
+        rtail: bool = _RTAIL_UNSET,
+        ) -> Any:
         xi = float(xi)
-        if xi < 0:
-            if not rtail:
-                raise ValueError(
-                    'If you provide a negative xi parameter, do not provide `rtail`. '
-                    'A left-tailed CarBen is computed automatically.'
+        if rtail is _RTAIL_UNSET:
+            rtail = True
+            if xi < 0:
+                warnings.warn(
+                    'CarBenHybrid(xi < 0) without `rtail` builds a left tail with shape |xi|, '
+                    'as in phat-tails 0.0.x. From the next release `xi` is always the tail shape '
+                    '(negative = bounded tail) and the default side is the right. '
+                    'Use CarBenHybrid(abs(xi), ..., rtail=False) or CarBenLeft(abs(xi), ...).',
+                    FutureWarning,
+                    stacklevel=2,
                 )
-            rtail = False
-            if xi_is_arg:
-                args[0] = -xi
-            else:
-                kwargs['xi'] = -xi
+                xi, rtail = -xi, False
 
-        return CarBenRight(*args, **kwargs) if rtail else CarBenLeft(*args, **kwargs)
+        return CarBenRight(xi, mu, sig, a) if rtail else CarBenLeft(xi, mu, sig, a)
 
 
 class Phat:
@@ -582,8 +590,11 @@ class Phat:
     sig:    scale of the shared Gaussian body. **Not** the standard deviation of
             the Phat variable; see :meth:`std`. For ``xi_l = xi_r = 0.2`` the
             standard deviation is about ``4.6 sig``.
-    xi_l:   shape of the left generalized Pareto tail, ``>= 0``
-    xi_r:   shape of the right generalized Pareto tail, ``>= 0``
+    xi_l:   shape of the left generalized Pareto tail, ``> -1``. Positive for a
+            heavy (power-law) tail, the case Phat is built for; zero for an
+            exponential tail; negative for a bounded GPD tail.
+    xi_r:   shape of the right generalized Pareto tail, same convention. Each
+            shape describes its own side: a fat left tail has ``xi_l > 0``.
     p:      mixture weights ``(p_l, p_r)``, non-negative and summing to 1.
             Default ``(0.5, 0.5)``.
 
@@ -601,6 +612,12 @@ class Phat:
     Gaussian remnant of the other component. At ``xi_l = xi_r = 0`` the tails are
     exponential, so Phat is not Gaussian.
 
+    With a negative shape the GPD tail of that component ends at
+    ``a_r + b_r / |xi_r|`` (``a_l - b_l / |xi_l|`` on the left). The mixture is
+    still supported on the whole real line, because the other component's
+    Gaussian body extends past that endpoint; beyond it the density is that
+    Gaussian remnant alone.
+
     The mean exists for ``max(xi_l, xi_r) < 1`` and the variance for
     ``max(xi_l, xi_r) < 1/2``; beyond those thresholds :meth:`mean` returns
     ``inf``/``-inf``/``nan`` and :meth:`var` returns ``inf``.
@@ -616,8 +633,8 @@ class Phat:
         mu, sig, xi_l, xi_r = (float(v) for v in (mu, sig, xi_l, xi_r))
         if not sig > 0:
             raise ValueError('`sig` must be positive')
-        if xi_l < 0 or xi_r < 0:
-            raise ValueError('`xi_l` and `xi_r` must be non-negative')
+        if xi_l <= -1 or xi_r <= -1:
+            raise ValueError('`xi_l` and `xi_r` must be greater than -1')
         self.mu = mu
         self.sig = sig
         self.xi_l = xi_l

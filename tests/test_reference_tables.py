@@ -102,32 +102,68 @@ def test_sampler_accepts_generator_int_and_none():
 
 
 class TestCarBenHybridConstructor:
-    # Before fix: `xi_is_arg = len(args) >= 0` was always true, so keyword
-    # construction raised IndexError and a negative keyword xi never flipped sign.
-    def test_positional_negative_xi_gives_left(self):
-        obj = ph.CarBenHybrid(-0.25, 1, 2)
-        assert isinstance(obj, ph.CarBenLeft)
-        assert obj.xi == 0.25
+    """
+    ``xi`` is the GPD shape of the tail; the side comes from ``rtail`` (or from
+    using ``CarBenRight`` / ``CarBenLeft`` directly). Until 0.0.x a negative
+    ``xi`` selected the left tail; that reading survives for one release, with
+    a ``FutureWarning``, only when ``rtail`` is not given.
+    """
 
-    def test_keyword_negative_xi_gives_left(self):
-        obj = ph.CarBenHybrid(xi=-0.25, mu=1, sig=2)
-        assert isinstance(obj, ph.CarBenLeft)
+    def test_positive_xi_defaults_to_right_without_warning(self, recwarn):
+        obj = ph.CarBenHybrid(0.25, 1, 2)
+        assert isinstance(obj, ph.CarBenRight)
         assert obj.xi == 0.25
+        assert not recwarn.list
 
     def test_keyword_positive_xi_gives_right(self):
         obj = ph.CarBenHybrid(xi=0.25, mu=1, sig=2)
         assert isinstance(obj, ph.CarBenRight)
         assert obj.xi == 0.25
 
-    def test_rtail_false_gives_left(self):
+    def test_rtail_false_gives_left(self, recwarn):
         obj = ph.CarBenHybrid(0.25, 1, 2, rtail=False)
         assert isinstance(obj, ph.CarBenLeft)
         assert obj.xi == 0.25
+        assert not recwarn.list
 
-    def test_negative_xi_with_rtail_false_raises(self):
+    def test_rtail_as_fifth_positional_argument(self):
+        obj = ph.CarBenHybrid(0.25, 1, 2, None, False)
+        assert isinstance(obj, ph.CarBenLeft)
+
+    # ---- new convention: with `rtail` given, xi is the shape, whatever its sign
+    def test_negative_xi_with_rtail_true_is_a_bounded_right_tail(self, recwarn):
+        obj = ph.CarBenHybrid(-0.25, 1, 2, rtail=True)
+        assert isinstance(obj, ph.CarBenRight)
+        assert obj.xi == -0.25
+        endpoint = obj.a + obj.b / 0.25
+        assert obj.sf(endpoint + 1e-9) == 0 and obj.sf(endpoint - 1e-3) > 0
+        assert not recwarn.list
+
+    def test_negative_xi_with_rtail_false_is_a_bounded_left_tail(self, recwarn):
+        obj = ph.CarBenHybrid(-0.25, 1, 2, rtail=False)
+        assert isinstance(obj, ph.CarBenLeft)
+        assert obj.xi == -0.25
+        endpoint = obj.a - obj.b / 0.25
+        assert obj.cdf(endpoint - 1e-9) == 0 and obj.cdf(endpoint + 1e-3) > 0
+        assert not recwarn.list
+
+    def test_shape_at_or_below_minus_one_is_rejected(self):
         with pytest.raises(ValueError):
-            ph.CarBenHybrid(-0.25, 1, 2, rtail=False)
+            ph.CarBenHybrid(-1.0, 0, 1, rtail=True)
+
+    # ---- one-release shim: negative xi without `rtail` still means "left tail"
+    def test_negative_xi_without_rtail_warns_and_gives_left(self):
+        with pytest.warns(FutureWarning, match='rtail'):
+            obj = ph.CarBenHybrid(-0.25, 1, 2)
+        assert isinstance(obj, ph.CarBenLeft)
+        assert obj.xi == 0.25
+
+    def test_keyword_negative_xi_without_rtail_warns_and_gives_left(self):
+        with pytest.warns(FutureWarning, match='rtail'):
+            obj = ph.CarBenHybrid(xi=-0.25, mu=1, sig=2)
+        assert isinstance(obj, ph.CarBenLeft)
+        assert obj.xi == 0.25
 
     def test_integer_xi_accepted(self):
-        assert isinstance(ph.CarBenHybrid(-1, 0, 1), ph.CarBenLeft)
         assert isinstance(ph.CarBenHybrid(1, 0, 1), ph.CarBenRight)
+        assert isinstance(ph.CarBenHybrid(1, 0, 1, rtail=False), ph.CarBenLeft)
