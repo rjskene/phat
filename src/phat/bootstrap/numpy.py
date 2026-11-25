@@ -19,6 +19,7 @@ Numba, when installed, compiles the inner loops; tqdm, when installed, shows a
 progress bar. Neither is required.
 """
 
+import warnings
 from collections.abc import Iterable
 from typing import Union
 
@@ -41,7 +42,10 @@ except ImportError:  # pragma: no cover - exercised in the core-only CI job
         return deco
 
 try:
-    from tqdm.auto import trange
+    with warnings.catch_warnings():
+        # in Jupyter without ipywidgets tqdm.auto warns and falls back to the text bar
+        warnings.simplefilter('ignore')
+        from tqdm.auto import trange
 except ImportError:  # pragma: no cover
     def trange(n, **kwargs):
         return range(n)

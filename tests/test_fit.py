@@ -3,6 +3,7 @@ import importlib.util
 
 import numpy as np
 import pytest
+import scipy.stats as scist
 
 import phat as ph
 from phat.fit import PhatFitResult, fit_phat
@@ -121,3 +122,47 @@ class TestStatsmodelsBackend:
     def test_statsmodels_backend_rejects_weights(self, sample):
         with pytest.raises(ValueError):
             ph.Phat.fit(sample, weights=(0.4, 0.6), backend='statsmodels')
+
+
+@pytest.fixture(scope='module')
+def gaussian_fit():
+    x = scist.norm(0.1, 2.0).rvs(4000, random_state=np.random.default_rng(5))
+    return fit_phat(x)
+
+
+class TestEstimateOnTheBoundary:
+    """Wald standard errors are not valid for an estimate that sits on a bound."""
+
+    def test_gaussian_sample_puts_both_shapes_on_the_bound(self, gaussian_fit):
+        res = gaussian_fit
+        assert res.params_dict['xi_left'] == 0.0
+        assert res.params_dict['xi_right'] == 0.0
+        assert res.at_bound == ('xi_left', 'xi_right')
+
+    def test_bound_estimates_have_no_standard_error(self, gaussian_fit):
+        res = gaussian_fit
+        bse = dict(zip(res.names, res.bse))
+        assert np.isnan(bse['xi_left']) and np.isnan(bse['xi_right'])
+        assert np.isfinite(bse['mu']) and np.isfinite(bse['sigma'])
+        lo, hi = res.conf_int().T
+        assert np.isnan(lo[2:]).all() and np.isnan(hi[2:]).all()
+
+    def test_summary_says_so_and_lines_up(self, gaussian_fit):
+        res = gaussian_fit
+        text = res.summary()
+        assert text.count('(at bound)') == 2
+        rows = [line for line in text.splitlines() if line.startswith(('mu', 'sigma', 'xi_'))]
+        assert len({len(row) for row in rows}) == 1
+
+    def test_interior_fit_reports_nothing_at_bound(self):
+        x = ph.Phat(0, 1, 0.3, 0.3).rvs(6000, random_state=np.random.default_rng(2))
+        res = fit_phat(x)
+        assert res.at_bound == ()
+        assert np.isfinite(res.bse).all()
+
+    def test_fixed_shapes_line_up_in_summary(self):
+        x = ph.Phat(0, 1, 0.3, 0.3).rvs(3000, random_state=np.random.default_rng(2))
+        text = fit_phat(x, 1 / 3, 0.3).summary()
+        rows = [line for line in text.splitlines() if line.startswith(('mu', 'sigma', 'xi_'))]
+        assert len({len(row) for row in rows}) == 1
+        assert '0.333333' in text

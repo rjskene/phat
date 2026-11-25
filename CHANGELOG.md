@@ -92,6 +92,17 @@ It is not on PyPI yet.
   `(iters, periods)`.
 - `GarchcastResults.plot(kind='price', random_state=...)` picks the displayed
   paths reproducibly.
+- `Phat.fit` reports no standard error for an estimate that sits on a bound
+  of the search (a tail shape at `xi = 0`, the usual case on equity returns).
+  The Wald standard error is not valid there, and after `Phat` began to accept
+  negative shapes the fit printed a finite number for it. `PhatFitResult` has
+  a new `at_bound` attribute naming such estimates, `summary()` marks them
+  `(at bound)`, and the standard errors of the other parameters are computed
+  with the bound ones held fixed.
+- `PhatFitResult.summary()` columns line up for `xi_left` / `xi_right`, and
+  fixed shapes print to six decimals.
+- The Hill double bootstrap no longer emits tqdm's "IProgress not found"
+  warning in Jupyter when `ipywidgets` is missing.
 - Asking for a name whose optional dependency is missing (`phat.PhatNet`
   without TensorFlow or pandas) raises an `ImportError` that names the extra
   to install, `pip install "phat-tails[learn]"`.

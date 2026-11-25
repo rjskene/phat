@@ -28,6 +28,7 @@ __all__ = ['PhatFitResult', 'fit_phat', 'PhatFit']  # noqa: F822  # PhatFit via 
 
 PARAM_NAMES = ('mu', 'sigma', 'xi_left', 'xi_right')
 _XI_MAX = 10.0
+_BOUND_TOL = 1e-8
 
 
 @dataclass
@@ -40,14 +41,18 @@ class PhatFitResult:
     params:     estimates of the free parameters, in :attr:`names` order
     names:      names of the free parameters (``mu``, ``sigma`` and, unless fixed, ``xi_left``, ``xi_right``)
     bse:        standard errors (square roots of the diagonal of :attr:`cov`); ``nan``
-                where the observed information is not invertible, for instance when a
-                tail shape sits on the ``xi = 0`` boundary
-    cov:        inverse observed-information matrix
+                for an estimate that sits on a bound (see :attr:`at_bound`) and where
+                the observed information is not invertible
+    cov:        inverse observed-information matrix of the estimates that are not on a
+                bound; ``nan`` in the rows and columns of those that are
     llf:        log-likelihood at the optimum
     nobs:       number of observations
     fixed:      parameters held fixed during the fit (``xi_left``, ``xi_right`` and ``weights``)
     converged:  whether the optimiser reported success
     message:    the optimiser's message
+    at_bound:   names of the estimates that sit on a bound of the search, typically a
+                tail shape at ``xi = 0``. The usual standard errors and Wald intervals
+                do not apply to them, so none are reported.
     """
 
     params: np.ndarray
@@ -59,6 +64,7 @@ class PhatFitResult:
     fixed: dict[str, Any] = field(default_factory=dict)
     converged: bool = True
     message: str = ''
+    at_bound: tuple[str, ...] = ()
 
     @property
     def params_dict(self) -> dict[str, float]:
@@ -94,11 +100,13 @@ class PhatFitResult:
 
     def summary(self) -> str:
         lines = [f'Phat maximum-likelihood fit  (nobs = {self.nobs}, llf = {self.llf:.4f})']
-        lines.append(f'{"":6} {"estimate":>12} {"std err":>12}')
+        lines.append(f'{"":8} {"estimate":>12} {"std err":>12}')
         for name, est, se in zip(self.names, self.params, self.bse):
-            lines.append(f'{name:6} {est:12.6f} {se:12.6f}')
+            err = '(at bound)' if name in self.at_bound else f'{se:.6f}'
+            lines.append(f'{name:8} {est:12.6f} {err:>12}')
         for name, value in self.fixed.items():
-            lines.append(f'{name:6} {str(value):>12} {"(fixed)":>12}')
+            shown = f'{value:.6f}' if isinstance(value, float) else str(value)
+            lines.append(f'{name:8} {shown:>12} {"(fixed)":>12}')
         if not self.converged:
             lines.append(f'WARNING: optimiser did not converge: {self.message}')
         return '\n'.join(lines)
@@ -189,24 +197,41 @@ def fit_phat(
     res = opt.minimize(nll, theta0, **kwargs)
 
     theta = np.asarray(res.x, dtype=float)
-    H = _numerical_hessian(nll, theta)
-    cov = np.full_like(H, np.nan)
-    if np.all(np.isfinite(H)):
-        try:
-            cov = np.linalg.inv(H)
-        except np.linalg.LinAlgError:
-            pass
-    bse = np.sqrt(np.where(np.diag(cov) > 0, np.diag(cov), np.nan))
+    names = PARAM_NAMES if free_tails else PARAM_NAMES[:2]
+
+    # An estimate on a bound has no Wald standard error. The observed information
+    # is taken over the remaining parameters, with the bound ones held there.
+    on_bound = np.array([
+        (lo is not None and value <= lo + _BOUND_TOL) or (hi is not None and value >= hi - _BOUND_TOL)
+        for value, (lo, hi) in zip(theta, kwargs.get('bounds') or [(None, None)] * theta.size)
+    ])
+    inside = np.flatnonzero(~on_bound)
+
+    def nll_inside(sub: np.ndarray) -> float:
+        full = theta.copy()
+        full[inside] = sub
+        return nll(full)
+
+    cov = np.full((theta.size, theta.size), np.nan)
+    if inside.size:
+        H = _numerical_hessian(nll_inside, theta[inside])
+        if np.all(np.isfinite(H)):
+            try:
+                cov[np.ix_(inside, inside)] = np.linalg.inv(H)
+            except np.linalg.LinAlgError:
+                pass
+    with np.errstate(invalid='ignore'):
+        bse = np.sqrt(np.where(np.diag(cov) > 0, np.diag(cov), np.nan))
 
     fixed: dict[str, Any] = {}
     if not free_tails:
         fixed['xi_left'], fixed['xi_right'] = float(xi_left), float(xi_right)  # type: ignore[arg-type]
     if weights is not None:
         fixed['weights'] = tuple(float(v) for v in weights)
-    names = PARAM_NAMES if free_tails else PARAM_NAMES[:2]
     return PhatFitResult(
         params=theta, names=names, bse=bse, cov=cov, llf=-float(res.fun), nobs=int(x.size),
         fixed=fixed, converged=bool(res.success), message=str(res.message),
+        at_bound=tuple(name for name, hit in zip(names, on_bound) if hit),
     )
 
 
