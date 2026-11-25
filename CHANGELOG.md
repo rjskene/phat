@@ -7,6 +7,13 @@ change.
 
 ## [Unreleased]
 
+### Fixed
+- `CarBenHybrid(xi=...)` by keyword raised `IndexError` because the
+  positional check `len(args) >= 0` was always true; a negative keyword `xi`
+  also never flipped sign. Keyword and positional construction now agree, and
+  integer / NumPy scalars are accepted for `xi`. The sign-of-`xi` convention
+  itself is unchanged (owner decision pending).
+
 ### Changed
 - `import phat` no longer imports TensorFlow, `arch`, `pmdarima` or Numba.
   `phat.bootstrap`, `phat.learn` and `phat.tseries` load on first use of

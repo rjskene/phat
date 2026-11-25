@@ -557,56 +557,49 @@ class CarBenLeft(CarBenBase):
         lvar = (bvar + tvar) / self.gamma
         return lvar
 
-class CarBenHybrid: 
+class CarBenHybrid:
     """
-    Light wrapper that simply reads the args/kwargs and
-    selects the tail to be used, either CarBenLeft or CarBenRight
+    Light wrapper that reads the arguments and returns either a
+    :class:`CarBenLeft` or a :class:`CarBenRight`.
 
-    If `xi>=0`:
-        if `rtail` argument == True, use CarBenRight
-        if `rtail` argument == False, use CarBenLeft
-    elif `xi<0`:
-        use CarBenLeft
+    Sign convention (kept from 0.0.x; see CHANGELOG):
 
-    i.e. You can simply pass a negative tail index to return a left-skewed CarBen
-    """  
+    * ``xi >= 0`` and ``rtail=True`` (default) -> ``CarBenRight``
+    * ``xi >= 0`` and ``rtail=False``          -> ``CarBenLeft``
+    * ``xi < 0``                                -> ``CarBenLeft`` with ``xi = -xi``
+
+    Passing a negative ``xi`` together with ``rtail=False`` is an error.
+    ``xi`` may be given positionally or by keyword; ``rtail`` may be given as
+    the fifth positional argument or by keyword.
+    """
+
     def __new__(cls, *args, **kwargs):
-        """
-        Takes arguments as per CarBenLeft/CarBenRight/CarBenBase
-
-        Returns 
-        --------
-        CarBenLeft or CarBenRight object
-        """
         args = list(args)
-        xi_is_arg =  len(args) >= 0
+        xi_is_arg = len(args) >= 1
+        if not xi_is_arg and 'xi' not in kwargs:
+            raise TypeError('CarBenHybrid requires `xi`')
         xi = args[0] if xi_is_arg else kwargs['xi']
-        
-        rtail_is_arg = len(args) >= 5
-        if rtail_is_arg:
+
+        if len(args) >= 5:
             rtail = args.pop(4)
         else:
-            rtail = kwargs.pop('rtail') if 'rtail' in kwargs else True
+            rtail = kwargs.pop('rtail', True)
 
-        if isinstance(xi, float):
-            if xi < 0 and not rtail:
-                txt = 'If you provide a negative xi parameter,'
-                txt += ' do not provide `rtail`.'
-                txt += ' A left-tailed CarBen is computed automatically.'
-                raise ValueError(txt)             
-            elif xi < 0:
-                rtail = False
-                if xi_is_arg:
-                    args[0] = -xi
-                else:
-                    kwargs['xi'] = xi
+        xi = float(xi)
+        if xi < 0:
+            if not rtail:
+                raise ValueError(
+                    'If you provide a negative xi parameter, do not provide `rtail`. '
+                    'A left-tailed CarBen is computed automatically.'
+                )
+            rtail = False
+            if xi_is_arg:
+                args[0] = -xi
+            else:
+                kwargs['xi'] = -xi
 
-        if rtail:
-            obj = CarBenRight(*args, **kwargs)
-        else:
-            obj = CarBenLeft(*args, **kwargs)
-            
-        return obj
+        return CarBenRight(*args, **kwargs) if rtail else CarBenLeft(*args, **kwargs)
+
 
 class PhatFit(GenericLikelihoodModel):
     """
