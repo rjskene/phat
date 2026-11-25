@@ -3,11 +3,8 @@ Collection of helper functions
 """
 
 import numpy as np
-import pandas as pd
 from functools import wraps
 from typing import Union, Iterable, Callable, Sequence
-
-import matplotlib.pyplot as plt
 
 XTYPE = Union[float, Iterable[Sequence[float]]]
 
@@ -21,16 +18,18 @@ def arrayarize(val:Iterable):
     """
     Converts list-like objects to np.ndarray
     """
-    list_types = (list, tuple, set, pd.Series)
+    list_types = (list, tuple, set)
     if isinstance(val, np.ndarray):
         pass
+    elif hasattr(val, 'to_numpy'):  # pandas Series / DataFrame without importing pandas
+        val = val.to_numpy()
     elif isinstance(val, list_types):
         val = np.array(val)
-    elif isinstance(val, (int, float)):
+    elif isinstance(val, (int, float, np.number)):
         val = np.array([val])
     else:
         text = 'You must provide an iterable of type: '
-        text += ', '.join(list_types)
+        text += ', '.join(t.__name__ for t in list_types)
         raise ValueError(text)
     return val
 
@@ -121,6 +120,7 @@ class PriceSim:
             return rets, S
         
     def sim_chart(self, rets, S, periods, axes:Iterable=None, title=''):
+        import matplotlib.pyplot as plt
         if axes is None:
             fig, axes = plt.subplots(1,2,figsize=(14,5))
         elif len(axes) != 2:
@@ -143,6 +143,7 @@ class PriceSim:
         return axes
     
     def sims_chart(self, S, ax=None, title='', *args, **kwargs):
+        import matplotlib.pyplot as plt
         if ax is None:
             fig, ax = plt.subplots(1,1,figsize=(10,6))
 
