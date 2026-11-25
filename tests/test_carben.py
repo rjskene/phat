@@ -1,7 +1,9 @@
 """test_class_parametrization.py"""
-import pytest
 import numpy as np
+import pytest
+
 import phat as ph
+
 
 @pytest.mark.parametrize('cb', ['cbr', 'cbl'], indirect=True)
 class TestGroup:
@@ -18,11 +20,11 @@ class TestGroup:
     @pytest.fixture
     def l_params(self):
         return (-.25, 1, 2)
-    
+
     @pytest.fixture
     def cbr(self, r_params):
         return ph.CarBenHybrid(*r_params)
-    
+
     @pytest.fixture
     def cbl(self, l_params):
         return ph.CarBenHybrid(*l_params)

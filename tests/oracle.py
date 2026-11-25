@@ -93,7 +93,8 @@ class OraclePhat:
         q = np.atleast_1d(np.asarray(q, float))
         out = np.empty_like(q)
         for i, qi in enumerate(q):
-            out[i] = brentq(lambda x: float(self.cdf(x)) - qi, -1e9, 1e9, xtol=1e-13, rtol=1e-13, maxiter=500)
+            out[i] = brentq(lambda x, qi=qi: float(self.cdf(x)) - qi, -1e9, 1e9,
+                            xtol=1e-13, rtol=1e-13, maxiter=500)
         return out
 
     def es_lower(self, q):

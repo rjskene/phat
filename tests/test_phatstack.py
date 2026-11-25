@@ -1,5 +1,6 @@
-import pytest
 import numpy as np
+import pytest
+
 import phat as ph
 
 n = 1052
@@ -32,7 +33,7 @@ class TestPhatStack:
 
     def test_correct_size(self, pstack, n, days):
         rvs = pstack.rvs((n, days))
-    
+
         assert rvs.shape[0] == n
         assert rvs.shape[1] == days
 

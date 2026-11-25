@@ -3,13 +3,20 @@ Custom functionality for generating ARMA-GARCH time-series forecasts.
 """
 from __future__ import annotations
 
-from typing import Iterable, Union, Tuple
 import warnings
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Union
+
 import numpy as np
 import scipy.stats
 
-from phat.utils import argsetter, arrayarize, PriceSim
+if TYPE_CHECKING:  # optional packages, imported for annotations only
+    import matplotlib.pyplot as plt
+    import pmdarima
+    from arch.univariate.base import ARCHModelResult
+
 from phat.dists import Phat, _rng
+from phat.utils import PriceSim, argsetter, arrayarize
 
 # Optional accelerators and model packages. Everything below degrades gracefully:
 # without Numba the forecast loop runs in pure Python; without `arch` only the
@@ -28,25 +35,31 @@ except ImportError:  # pragma: no cover - exercised in the core-only CI job
             return func
         return deco
 
-try:
-    from arch.univariate.base import ARCHModelResult as _ARCHModelResult
-    from arch.univariate.mean import ConstantMean as _ConstantMean
-except ImportError:  # pragma: no cover
-    _ARCHModelResult = ()   # isinstance(x, ()) is always False
-    _ConstantMean = ()
-
 ALLOWED_DISTS = Union[Phat, scipy.stats._distn_infrastructure.rv_frozen]
 
 
+# Fitted models from `arch` and `pmdarima` are recognised by duck typing so that
+# neither package has to be installed, or imported, to use Garchcaster.
+def _is_arch_result(obj) -> bool:
+    """A fitted ``arch`` model (``arch.univariate.base.ARCHModelResult``)."""
+    needed = ('model', 'params', 'std_resid', 'conditional_volatility', 'resid')
+    return all(hasattr(obj, name) for name in needed)
+
+
+def _is_constant_mean(model) -> bool:
+    """``arch.univariate.mean.ConstantMean``: a mean model without lags."""
+    return type(model).__name__ == 'ConstantMean' or getattr(model, 'lags', None) is None
+
+
 def _is_pmdarima_arima(obj) -> bool:
-    """Duck-typed check for a fitted ``pmdarima.ARIMA`` without importing pmdarima."""
+    """A fitted ``pmdarima.ARIMA``."""
     return hasattr(obj, 'order') and callable(getattr(obj, 'params', None)) and hasattr(obj, 'arima_res_')
 
 
 ###### Numba helper functions to improve GarchForecast speed ######
 @_njit(cache=True)
 def _step_sum(
-    params:Iterable[float], 
+    params:Iterable[float],
     values:Iterable[float]
     ) -> float:
     """
@@ -66,20 +79,20 @@ def _step_sum(
     for i in range(values.shape[0]):
         sums[i] = params[i]*values[i]
 
-    return np.sum(sums)    
+    return np.sum(sums)
 
 @_njit(cache=True)
 def _arma_one_step(
-    y:np.ndarray, 
-    resids:np.ndarray, 
-    constant:float, 
-    ar_params:np.ndarray, 
-    ma_params:np.ndarray, 
-    m:int, 
+    y:np.ndarray,
+    resids:np.ndarray,
+    constant:float,
+    ar_params:np.ndarray,
+    ma_params:np.ndarray,
+    m:int,
     n:int
     ) -> float:
     """
-    ARMA calculation for single step of forecast. Captures correlation of 
+    ARMA calculation for single step of forecast. Captures correlation of
     current period mean return with prior period error terms.
 
     Params
@@ -105,12 +118,12 @@ def _garch_one_step(
     constant:float,
     arch_params:np.ndarray,
     garch_params:np.ndarray,
-    p:int, 
+    p:int,
     q:int
     ) -> float:
     """
     GARCH calculation for single step of forecast. Captures correlation of
-    current period volatility with prior period residuals. The ARCH process is 
+    current period volatility with prior period residuals. The ARCH process is
     analogous to the MA process for the mean. It is also a subset of GARCH, as:
 
                                 ARCH(q) = GARCH(0,q)
@@ -126,7 +139,7 @@ def _garch_one_step(
     garch_params:      np.ndarray; paramters of the GARCH process
     p:              int; order of the ARCH process
     q:              int; order of the GARCH process
-                
+
     GARCH calculation for single step of forecast. Captures correlation of
     current period volatility with prior volatility. The "generalized" portion of
     "G"ARCH is analogous to the AR process for the mean. Unlike AR, however, it is
@@ -142,7 +155,7 @@ def _garch_one_step(
     resid_t = np.sqrt(var_t)*innov
 
     return var_t, resid_t
-                   
+
 class PROCESSMIXIN:
     """
     Mixin to provide common functionality to MEAN and VOL classes
@@ -163,7 +176,8 @@ class PROCESSMIXIN:
         """
         Infers the order of an ARMA or GARCH process.
 
-        If params is even, assume even split between the params. If odd, assumes modulus lag belogs to first order.
+        If params is even, assume even split between the params. If odd, assumes modulus lag belongs to
+        first order.
 
         Parameters
         -----------
@@ -178,7 +192,7 @@ class PROCESSMIXIN:
         else:
             first_order = len(params) // 2 + len(params) % 2
             second_order = len(params) // 2
-        
+
         return first_order, second_order
 
 class MEAN(PROCESSMIXIN):
@@ -198,27 +212,27 @@ class MEAN(PROCESSMIXIN):
         ):
         self.params = params.values if hasattr(params, 'values') else params
         self._m, self._n = self._infer_order(params[1:]) if order is None else order
-    
+
     @property
     def m(self) -> int:
         return self._m
-    
+
     @property
     def n(self) -> int:
         return self._n
-    
+
     @property
     def order(self) -> tuple:
         return self.m, self.n
-    
+
     @property
     def ar_params(self) -> Iterable:
         return self.params[1:1+self.m]
-    
+
     @property
     def ma_params(self) -> Iterable:
         return self.params[1+self.m:1+self.m+self.n]
-    
+
     @property
     def properties(self) -> Union[None, tuple]:
         return self.constant, self.ar_params, self.ma_params, self.m, self.n
@@ -233,24 +247,24 @@ class VOL(PROCESSMIXIN):
     -----------
     params:     iterable; values of constant plus any m, n process
     order:      tuple; 2x1 of p, q order
-                where:  p = autoregressive to prior volatility 
+                where:  p = autoregressive to prior volatility
                         n = autoregressive to prior residuals
-    """    
+    """
     def __init__(self,
         params:Iterable,
         order:tuple=None
         ):
         self.params = params.values if hasattr(params, 'values') else params
         self._p, self._q = self._infer_order(params[1:]) if order is None else order
-    
+
     @property
     def p(self) -> int:
         return self._p
-    
+
     @property
     def q(self) -> int:
         return self._q
-    
+
     @property
     def order(self) -> tuple:
         return self.p, self.q
@@ -258,7 +272,7 @@ class VOL(PROCESSMIXIN):
     @property
     def arch_params(self):
         return self.params[1:1+self.q]
-    
+
     @property
     def garch_params(self):
         return self.params[1+self.q:1+self.q+self.p]
@@ -279,9 +293,9 @@ class GarchcastResults:
     vols:       np.ndarray; 2d iters x periods array of forecast volatilities
     resids:     np.ndarray; 2d iters x periods array of forecast residuals relative to ARMA-GARCH
     """
-    def __init__(self, 
-        values:np.ndarray, 
-        vols:np.ndarray, 
+    def __init__(self,
+        values:np.ndarray,
+        vols:np.ndarray,
         resids:np.ndarray
         ):
         self.values = values
@@ -314,11 +328,11 @@ class GarchcastResults:
         return self._sim
 
     def plot(
-        self, 
-        kind:str='vol', 
-        ax:Union['plt.Axes', Iterable['plt.Axes']]=None, 
+        self,
+        kind:str='vol',
+        ax:Union[plt.Axes, Iterable[plt.Axes]]=None,
         *args, **kwargs
-        ) -> Union['plt.Axes', Iterable['plt.Axes']]:
+        ) -> Union[plt.Axes, Iterable[plt.Axes]]:
         """
         Main method used to generate plots
 
@@ -351,8 +365,8 @@ class GarchcastResults:
             if 'n' in kwargs:
                 n = kwargs['n']
                 kwargs.pop('n')
-            
-            ax = self._plot_price(p=p, n=n, axes=ax, *args, **kwargs)
+
+            ax = self._plot_price(p, n, ax, *args, **kwargs)
         elif kind == 'end_price':
             if len(args) > 1:
                 p = args[0]
@@ -360,96 +374,97 @@ class GarchcastResults:
                 p = kwargs['p']
                 kwargs.pop('p')
 
-            return self._plot_end_price(p=p, ax=ax, *args, **kwargs)
+            return self._plot_end_price(p, ax, *args, **kwargs)
         else:
             raise ValueError(f'`kind:` {kind} not supported')
 
         return ax
 
-    def _plot_vol(self, ax:'plt.Axes', *args, **kwargs) -> Union['plt.Axes', Iterable['plt.Axes']]:
+    def _plot_vol(self, ax:plt.Axes, *args, **kwargs) -> Union[plt.Axes, Iterable[plt.Axes]]:
         import matplotlib.pyplot as plt
         ax.plot((self.vols).mean(axis=0))
         ax.set_xlabel('Days')
         plt.suptitle('Phat-GARCH Forecast: Conditional Volatility')
 
         return ax
-        
-    def _plot_var(self, ax, *args, **kwargs) -> Union['plt.Axes', Iterable['plt.Axes']]:
+
+    def _plot_var(self, ax, *args, **kwargs) -> Union[plt.Axes, Iterable[plt.Axes]]:
         import matplotlib.pyplot as plt
         ax.plot((self.vols**2).mean(axis=0), *args, **kwargs)
         ax.set_xlabel('Days')
         plt.suptitle('Phat-GARCH Forecast: Conditional Variance')
-        
+
         return ax
 
-    def _plot_price(self, 
-        p:float, 
-        n:int, 
-        axes:Iterable['plt.Axes'], 
+    def _plot_price(self,
+        p:float,
+        n:int,
+        axes:Iterable[plt.Axes],
         *args, **kwargs
-        ) -> Iterable['plt.Axes']:
+        ) -> Iterable[plt.Axes]:
         sim = self._make_sim(p=p)
-        
+
         all_axes = []
         for i in np.random.randint(0, self.iters, size=n):
-            _, __, chart_axes = sim.sim(rets=(1 + self.values[i]/100), axes=axes, show_chart=True, *args, **kwargs)
+            _, __, chart_axes = sim.sim(None, 1 + self.values[i]/100, None, True, *args, axes=axes, **kwargs)
             all_axes.append(chart_axes)
-        
+
         if axes is None:
             return np.array(all_axes)
         else:
             return axes
 
-    def _plot_end_price(self, 
-        p:float, 
-        ax:'plt.Axes', 
+    def _plot_end_price(self,
+        p:float,
+        ax:plt.Axes,
         *args, **kwargs
-        ) -> Tuple['plt.Axes', np.ndarray, np.ndarray]:
+        ) -> tuple[plt.Axes, np.ndarray, np.ndarray]:
         sim = self._make_sim(p=p)
-        _, P, (ax, bins) = sim.sims(rets=1 + self.values/100, ax=ax, show_chart=True, *args, **kwargs)
+        _, P, (ax, bins) = sim.sims(None, 1 + self.values/100, True, *args, ax=ax, **kwargs)
         return ax, P, bins
 
 class Garchcaster:
     """
 Class for forecasting time series via ARMA-GARCH process.
 
-Instances of a `pmdarima`-based ARIMA object and/or an ARCHModelResult from the 
+Instances of a `pmdarima`-based ARIMA object and/or an ARCHModelResult from the
 `arch` package can be provided directly. Alternatively, the user can provide all
-residuals, standardized residuals, conditional volatilities, the parameters for 
+residuals, standardized residuals, conditional volatilities, the parameters for
 the ARMA-GARCH process, and the order.
 
 Params:
-    arma: instance of pmdarima ARIMA class OR iterable of floats 
+    arma: instance of pmdarima ARIMA class OR iterable of floats
         Either provide a pmdarima instance or the params derived from any arima process.
         If None, will search for AR process in `garch`, otherwise assumes ConstantMean.
     garch: instance of arch ARCHModelResult class OR iterable of floats
         either provide an ARCHModelResult instance or the params derived from any garch process
-    y:  float or iterable of floats 
+    y:  float or iterable of floats
         iters x periods standardized residuals after filtering an ARMA-GARCH. Only required if
         garch is not ARCHModelResult type.
     vols: float or iterable of floats
-        iters x periods conditional volatilities resulting from an ARMA-GARCH process. Only required if 
+        iters x periods conditional volatilities resulting from an ARMA-GARCH process. Only required if
         garch is not ARCHModelResult type.
     resids: float or iterable of floats
-        iters x periods residuals after filtering an ARMA-GARCH. Only required if garch is not ARCHModelResult type.
-    iters: int 
+        iters x periods residuals after filtering an ARMA-GARCH. Only required if garch is not an
+        ARCHModelResult.
+    iters: int
         number of iterations of forecast
-    periods: int 
+    periods: int
         number of periods in each iteration of the forecast
-    dist: Phat or scipy rv_frozen class 
+    dist: Phat or scipy rv_frozen class
         distribution used to generate residuals
-    use_backcast: bool 
+    use_backcast: bool
         use procedure to smooth values. See `here <https://arch.readthedocs.io/en/latest/univariate/generated/generated/arch.univariate.GARCH.backcast.html>`_.
     """
     GARCH_HAS_MEAN_PROCESS = False
 
     def __init__(self,
-        garch:Union['ARCHModelResult', Iterable[float]]=None,
-        arma:Union['pmdarima.ARIMA', Iterable[float]]=None,
+        garch:Union[ARCHModelResult, Iterable[float]]=None,
+        arma:Union[pmdarima.ARIMA, Iterable[float]]=None,
         y:Iterable[float]=None,
         vols:Iterable[float]=None,
         resids:Iterable[float]=None,
-        iters:int=1, 
+        iters:int=1,
         periods:int=252,
         order:tuple=None,
         dist:ALLOWED_DISTS=None,
@@ -460,8 +475,8 @@ Params:
             m, _, n = arma.order
             mean_order = (m,n)
             mean_params = arma.params()[:5]
-        elif isinstance(garch, _ARCHModelResult):
-            if isinstance(garch.model, _ConstantMean):
+        elif _is_arch_result(garch):
+            if _is_constant_mean(garch.model):
                 mean_order = (0, 0)
                 mean_params = garch.params[:1]
             else:
@@ -471,11 +486,11 @@ Params:
         elif arma is not None:
             mean_order = list(order)[:2] if order is not None else None
             mean_params = arrayarize(arma)
-        
+
         self.mean = MEAN(mean_params, order=mean_order)
 
         ### Second, set self.vol
-        if isinstance(garch, _ARCHModelResult):
+        if _is_arch_result(garch):
             if hasattr(garch.model.volatility, 'p'):
                 vol_order = (garch.model.volatility.p, garch.model.volatility.q)
             else:
@@ -495,12 +510,12 @@ Params:
             msg = 'The `order` parameter provided does not match the order'
             msg += ' inferred from the models provided and has been OVERRIDDEN. The `order` parameter'
             msg += ' is not required when passing `arch` and/or pmdarima models to Garchcaster.'
-            warnings.warn(msg)
+            warnings.warn(msg, stacklevel=2)
 
         self.maxlag = max(self.order)
 
         ### Third, assign values
-        if isinstance(garch, _ARCHModelResult):
+        if _is_arch_result(garch):
             if any([y is not None, vols is not None, resids is not None]):
                 raise ValueError('If `garch` is ARCHModelResult do not provide `y`, `vol`, or `resids`')
             else:
@@ -511,27 +526,25 @@ Params:
             y = arrayarize(y).copy()
             vols = arrayarize(vols).copy()
             resids = arrayarize(resids).copy()
-        
+
         self.periods = periods
         self.iters = iters
-   
+
         self.y_hist = y[-self.maxlag:]
         self.vols_hist = vols[-self.maxlag:]
         self.resids_hist = self._backcast(resids, self.maxlag) if use_backcast else resids[-self.maxlag:]
-        
+
         self._dist = dist
-    
+
     @property
     def dist(self) -> ALLOWED_DISTS:
-        if self._dist is None:
-            raise NotImplementedError('You must pass `dist` parameter')
-        else:
-            return self._dist
+        """Innovation distribution; ``None`` means standard Gaussian innovations."""
+        return self._dist
 
     @argsetter(['iters', 'periods'], flat=True)
-    def _sample_innovs(self, 
-        iters:int=None, 
-        periods:int=None, 
+    def _sample_innovs(self,
+        iters:int=None,
+        periods:int=None,
         dist:ALLOWED_DISTS=None,
         seed:int=None,
         ) -> np.ndarray:
@@ -576,14 +589,14 @@ Params:
         vols:np.ndarray,
         resids:np.ndarray,
         innovs:np.ndarray,
-        iters:int, 
+        iters:int,
         periods:int,
         mean_args:tuple,
         vol_args:tuple,
-        ) -> Tuple[np.ndarray]:
+        ) -> tuple[np.ndarray]:
         """
         Main iterative, feed-forward function for forecasting an ARMA-GARCH process.
-        
+
         Process
         --------
         To forecast a single-step period within a single iteration of the forecast
@@ -597,14 +610,14 @@ Params:
 
         Params
         -------
-        y:              np.ndarray; historical standardized residuals of ARMA-GARCH fit up to `maxlag` periods ago
+        y:              np.ndarray; historical standardized residuals of ARMA-GARCH fit, last `maxlag` periods
         vols:           np.ndarray; historical volatilities of ARMA-GARCH fit up to `maxlag` periods ago
         resids:         np.ndarray; historical residuals of ARMA-GARCH fit up to `maxlag` periods ago
         innovs:         iters x periods np.ndarray of garch residuals
         iters:          int; number of iterations of forecast
         periods:        int; number of periods in each iteration of the forecast
         dist:           Phat or scipy rv_frozen class; distribution used to generate residuals
-        mean_args:      tuple; properties of the mean process use in `_arma_one_step`    
+        mean_args:      tuple; properties of the mean process use in `_arma_one_step`
         vol_args:       tuple; properties of the vol process use in `_garch_one_step`
         """
         y_ = np.zeros((iters, periods))
@@ -621,11 +634,11 @@ Params:
                 y_[i, t] = mu_t + resid_t
                 vols_[i, t] = np.sqrt(var_t)
                 resids_[i, t] = resid_t
-                
+
                 y_i[-1] = y_[i, t]
                 vols_i[-1] = vols_[i, t]
-                resids_i[-1] = resids_[i, t]                
-            
+                resids_i[-1] = resids_[i, t]
+
                 if y.size > 1:
                     y_i[-y_i.size:-1] = y_i[-y_i.size+1:]
                     vols_i[-y_i.size:-1] = vols_i[-y_i.size+1:]
@@ -636,9 +649,9 @@ Params:
         return y_, vols_, resids_
 
     @argsetter(['dist', 'iters', 'periods'], flat=True)
-    def forecast(self, 
-        iters:int=None, 
-        periods:int=None, 
+    def forecast(self,
+        iters:int=None,
+        periods:int=None,
         dist:ALLOWED_DISTS=None,
         innovs:Iterable=None,
         seed:int=None,
@@ -662,9 +675,9 @@ Params:
             innovs = self._sample_innovs(iters, periods, dist=dist, seed=seed)
 
         results = Garchcaster._forecast_looper(
-            self.y_hist, 
-            self.vols_hist, 
-            self.resids_hist, 
+            self.y_hist,
+            self.vols_hist,
+            self.resids_hist,
             innovs,
             iters, periods,
             self.mean.props,

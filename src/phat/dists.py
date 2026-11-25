@@ -6,12 +6,20 @@ Separate code required for Tensorflow. Found in .learn.dists
 WARNING: Only CarBen and Phat distributions should be used. The remaining
 distributions are for illustration purposes in the docs.
 """
-from typing import Union, Iterable, Sequence, Callable, List
-import numpy as np
-import scipy.stats as scist
-import scipy.special as spec
+from __future__ import annotations
 
-from phat.utils import argsetter, arrayarize, sech_squared, stacker, dotweight, XTYPE
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Union
+
+import numpy as np
+import scipy.special as spec
+import scipy.stats as scist
+
+from phat.utils import XTYPE, argsetter, arrayarize, sech_squared
+
+if TYPE_CHECKING:
+    from phat.fit import PhatFit
+
 
 class BLineSig:
     """
@@ -23,21 +31,21 @@ class BLineSig:
         self.k = k
 
     @argsetter('xk')
-    def sf(self, x, k:float=None):
+    def sf(self, x, k:float | None=None):
         return .5*(1 - np.tanh(k*x))
 
     @argsetter('xk')
-    def pdf(self, x, k:float=None):
-        return .5*k*sech_squared(x,k)
-    
+    def pdf(self, x, k:float | None=None):
+        return .5*k*sech_squared(x,k)  # type: ignore[operator]  # argsetter fills k
+
     @argsetter('k')
     def var(self, k):
         return np.pi**2 / (12*k**2)
-    
+
     @argsetter('k')
     def m4(self, k):
         return 7*np.pi**4 / (240*k**4)
-    
+
     @argsetter('k')
     def kurt(self, k):
         return self.m4(k) / self.var(k)**2
@@ -51,7 +59,7 @@ class LogPareto:
     def __init__(self, alpha=2, L=1):
         self.alpha = alpha
         self.L = L
-        
+
     def sf(self, x):
         return (self.L**self.alpha)*(np.log(x)**(-self.alpha))
 
@@ -59,7 +67,7 @@ class DBLFat(scist.rv_continuous):
     """
     Baseclass for group of twin-tailed fat-tailed distributions
 
-    FOR ILLUSTRATION PURPOSES ONLY    
+    FOR ILLUSTRATION PURPOSES ONLY
     """
     @property
     def dist(self):
@@ -72,27 +80,27 @@ class DBLFat(scist.rv_continuous):
     @argsetter(['x', 'shape'])
     def _pdf(self, x, shape):
         pdf = np.where(
-            x>=0, 
-            self.dist.pdf(x, shape), 
+            x>=0,
+            self.dist.pdf(x, shape),
             self.dist.pdf(-x, shape)
         )
         return pdf / 2
-    
+
     @argsetter(['x', 'shape'])
     def _cdf(self, x, shape):
         cdf = np.where(
             x>=0,
-            .5 + (self.dist.cdf(x, shape)/2), 
-            
+            .5 + (self.dist.cdf(x, shape)/2),
+
             self.dist.sf(-x, shape)/2
         )
         return cdf
-    
+
     @argsetter(['q', 'shape'])
     def _ppf(self, q, shape):
         if isinstance(q, (float, int)):
             q = np.array([q])
-        
+
         ppf = np.where(
             q>=self.qjunc,
             self.dist.ppf(1/self.qjunc*(q - self.qjunc), shape),
@@ -100,17 +108,17 @@ class DBLFat(scist.rv_continuous):
         )
 
         return ppf
-    
+
     def _rvs(self, *args, **kwargs):
         rvs = super()._rvs(*args, **kwargs)
         return rvs
-    
+
 class DBLGP(DBLFat):
     dist = scist.genpareto
-    
+
 class DBLLomax(DBLFat):
     dist = scist.lomax
-    
+
 class DBLPareto(DBLFat):
     dist = scist.pareto
 
@@ -126,7 +134,7 @@ def _scalar_or_array(out):
     return out[()] if out.ndim == 0 else out
 
 
-def _rng(random_state=None) -> np.random.Generator:
+def _rng(random_state=None) -> Union[np.random.Generator, np.random.RandomState]:
     """Coerce ``None``, an integer seed, a ``Generator`` or a legacy ``RandomState``."""
     if isinstance(random_state, (np.random.Generator, np.random.RandomState)):
         return random_state
@@ -168,8 +176,8 @@ class CarBenBase:
     def __init__(self,
         xi: float,
         mu: float,
-        sig: float = None,
-        a: float = None,
+        sig: float | None = None,
+        a: float | None = None,
         ) -> None:
         xi = float(xi)
         if xi <= -1:
@@ -188,6 +196,7 @@ class CarBenBase:
             self._given = 'sig'
             self.a = self._calc_a()
         else:
+            assert a is not None
             self.a = float(a)
             self._given = 'a'
             self.sig = self._calc_sig()
@@ -242,6 +251,22 @@ class CarBenBase:
         """``b`` from the junction: ``sig = |a - mu| / s`` so ``b = (1 + xi) |a - mu| / W(z)``."""
         return (1 + self.xi) * abs(self.a - self.mu) / self.W_z()
 
+    # ---- defined by the right/left subclasses ----------------------------------
+    def _calc_a(self) -> float:
+        raise NotImplementedError
+
+    def _calc_sig(self) -> float:
+        raise NotImplementedError
+
+    def mean(self) -> float:
+        raise NotImplementedError
+
+    def var(self) -> float:
+        raise NotImplementedError
+
+    def ppf(self, q: XTYPE) -> XTYPE:
+        raise NotImplementedError
+
     # ---- generic helpers --------------------------------------------------
     def _zscore(self, x: np.ndarray) -> np.ndarray:
         return (x - self.mu) / self.sig
@@ -254,7 +279,7 @@ class CarBenBase:
         return self.mean(), self.var()
 
     def rvs(self,
-        size: Union[int, Iterable[int]] = None,
+        size: Union[int, Sequence[int], None] = None,
         random_state=None,
         *,
         seed=None,
@@ -308,7 +333,7 @@ class CarBenRight(CarBenBase):
         return _scalar_or_array(out)
 
     def sf(self, x: XTYPE) -> np.ndarray:
-        """Survival function ``P(X > x)``, computed without ``1 - cdf`` so the far tail keeps its precision."""
+        """Survival function ``P(X > x)``, computed without ``1 - cdf`` so the far tail keeps precision."""
         x = _as_float_array(x)
         out = np.where(x > self.a, self.tail.sf(x), 1.0 + self._phi_s - self.body.cdf(x)) / self.gamma
         return _scalar_or_array(out)
@@ -398,7 +423,8 @@ class CarBenRight(CarBenBase):
     def _gauss_upper_partial(self, t: np.ndarray) -> np.ndarray:
         """``int_{min(t, a)}^{a} x phi(x) dx``."""
         z = np.minimum(self._zscore(t), self.s)
-        return self.mu * (self._phi_s - scist.norm.cdf(z)) - self.sig * (scist.norm.pdf(self.s) - scist.norm.pdf(z))
+        body = self._phi_s - scist.norm.cdf(z)
+        return self.mu * body - self.sig * (scist.norm.pdf(self.s) - scist.norm.pdf(z))
 
     def _gpd_lower_partial(self, t: np.ndarray) -> np.ndarray:
         """``int_{a}^{max(t, a)} x g(x) dx`` for the un-normalised GPD part; finite for every ``xi``."""
@@ -621,7 +647,7 @@ class Phat:
         return {name: arg for name, arg in zip(self.PARAM_NAMES, self.args)}
 
     @property
-    def learnable_params(self) -> List[float]:
+    def learnable_params(self) -> list[float]:
         """The four free parameters ``(mu, sig, xi_l, xi_r)``."""
         return [self.params[name] for name in self.PARAM_NAMES[:4]]
 
@@ -793,7 +819,7 @@ class Phat:
         sd = self.std()
         if not np.isfinite(sd):
             raise ValueError('standard deviation is infinite: both tail shapes must be below 1/2')
-        return self.rvs(*args, **kwargs) / sd
+        return np.asarray(self.rvs(*args, **kwargs)) / sd
 
     # ---- moments ------------------------------------------------------------
     def mean(self) -> float:
@@ -841,7 +867,7 @@ class Phat:
 
     # ---- estimation ---------------------------------------------------------
     @staticmethod
-    def fit(values, xi_l: float = None, xi_r: float = None) -> 'PhatFit':
+    def fit(values, xi_l: float = None, xi_r: float = None) -> PhatFit:
         """
         Maximum-likelihood fit via ``statsmodels``.
 
@@ -884,28 +910,28 @@ class PhatStack(Phat):
 
     def __init__(
         self,
-        *phats: Phat,
-        p: Iterable = None
+        *phats: Any,
+        p: Sequence[float] | None = None
         ) -> None:
-        if len(phats) == 1:
-            phats = phats[0]
+        nested = len(phats) == 1 and not isinstance(phats[0], Phat)
+        comps: tuple[Phat, ...] = tuple(phats[0]) if nested else phats
 
-        if p is None or len(phats) != len(p):
+        if p is None or len(comps) != len(p):
             txt = 'Length of probabilities does not match number'
-            txt += f' of distributions: {len(phats)} v {None if p is None else len(p)}'
+            txt += f' of distributions: {len(comps)} v {None if p is None else len(p)}'
             raise AssertionError(txt)
 
-        self.n_comps = len(phats)
-        self.phats = phats
+        self.n_comps = len(comps)
+        self.phats = comps
         self.p = arrayarize(p)
 
-    def rvs(self,
-        size: Iterable[int] = None,
+    def rvs(self,  # type: ignore[override]  # PhatStack draws 2-d blocks, see the docstring
+        size: Sequence[int] | None = None,
         random_state=None,
         return_splits: bool = False,
         *,
         seed=None,
-        ) -> XTYPE:
+        ) -> Any:
         """
         Array of random draws, shape ``size = (m, n)`` only.
 
@@ -928,7 +954,7 @@ class PhatStack(Phat):
         rmdr = size[0] - iters.sum()
         iters[:rmdr] += 1
 
-        Y = np.zeros(size)
+        Y = np.zeros(tuple(size))
         start = 0
         for phat, end in zip(self.phats, iters):
             if end:

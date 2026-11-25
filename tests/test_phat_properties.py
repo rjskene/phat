@@ -92,7 +92,8 @@ def test_sf_accurate_in_far_tail(pair):
     xl = dist.mu - dist.sig * np.array([1e3, 1e5, 1e7])
     cdf = dist.cdf(xl)
     L = oracle.L
-    expected_l = dist.p[0] * st.genpareto.sf(2 * dist.mu - xl, L["xi"], loc=oracle.a_r if False else dist.mu + dist.sig * L["s"], scale=L["b"]) / L["gam"]
+    a_mirror = dist.mu + dist.sig * L["s"]
+    expected_l = dist.p[0] * st.genpareto.sf(2 * dist.mu - xl, L["xi"], loc=a_mirror, scale=L["b"]) / L["gam"]
     np.testing.assert_allclose(cdf, expected_l, rtol=1e-10)
 
 
@@ -139,7 +140,7 @@ def test_component_moments_with_location_and_scale():
         left = ph.CarBenLeft(xi, mu, sig)
         a = right.a
 
-        def m(k, f):
+        def m(k, f, a=a):
             return quad(lambda x: x**k * float(f(x)), -np.inf, a, limit=400)[0] + quad(
                 lambda x: x**k * float(f(x)), a, np.inf, limit=400
             )[0]
@@ -190,9 +191,11 @@ def test_location_scale_family():
 def test_expected_shortfall_matches_quadrature(pair):
     dist, oracle = pair
     for q in (0.01, 0.05, 0.25):
-        assert dist.expected_shortfall(q, tail="left") == pytest.approx(oracle.es_lower(q), rel=1e-7, abs=1e-9)
+        es_l = dist.expected_shortfall(q, tail="left")
+        assert es_l == pytest.approx(oracle.es_lower(q), rel=1e-7, abs=1e-9)
         if dist.xi_r < 1:
-            assert dist.expected_shortfall(q, tail="right") == pytest.approx(oracle.es_upper(q), rel=1e-7, abs=1e-9)
+            es_r = dist.expected_shortfall(q, tail="right")
+            assert es_r == pytest.approx(oracle.es_upper(q), rel=1e-7, abs=1e-9)
     np.testing.assert_allclose(
         dist.expected_shortfall(np.array([0.01, 0.05])),
         [dist.expected_shortfall(0.01), dist.expected_shortfall(0.05)],

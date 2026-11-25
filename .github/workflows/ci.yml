@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: ruff + mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install ".[dev]"
+      - run: ruff check src tests
+      - run: mypy
+
+  test:
+    name: pytest (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]   # macos-latest is Apple Silicon
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip
+      - run: pip install ".[dev]"
+      - run: python -c "import sys, phat; assert 'tensorflow' not in sys.modules; print(phat.__version__)"
+      - run: pytest -p no:cacheprovider
+
+  core-only:
+    name: core install (numpy + scipy only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install . pytest
+      - run: pip list
+      # the distribution, the pure-Python bootstrap and the array-based Garchcaster must work with no extras
+      - run: pytest -p no:cacheprovider tests/test_reference_tables.py tests/test_phat_properties.py tests/test_carben.py tests/test_phatstack.py tests/test_bootstrap.py tests/test_tseries.py

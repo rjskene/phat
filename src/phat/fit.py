@@ -5,10 +5,10 @@ This module imports ``statsmodels`` at load time and is therefore imported
 lazily by :meth:`phat.dists.Phat.fit`. Install the extra with
 ``pip install "phat-tails[fit]"``.
 """
-from typing import Callable, Iterable
+from collections.abc import Callable, Iterable
+
 import numpy as np
 import scipy.stats as scist
-
 from statsmodels.base.model import GenericLikelihoodModel as _GenericLikelihoodModel
 
 from phat.dists import Phat
@@ -62,16 +62,20 @@ class PhatFit(_GenericLikelihoodModel):
         """
         Start values: Gaussian ``norm.fit`` for ``(mu, sig)``; ``0.2`` for a free tail shape.
         """
+        free_tails = self.xi_left is None and self.xi_right is None
         if start_params is None:
-            if self.xi_left is None and self.xi_right is None:
-                if 'xi_l' not in self.exog_names:
-                    self.exog_names.append('xi_l')
-                    self.exog_names.append('xi_r')
+            if free_tails:
                 start_params = np.zeros(4)
                 start_params[:2] = scist.norm.fit(self.endog)
                 start_params[-2:] = [.2, .2]
             else:
                 start_params = np.asarray(scist.norm.fit(self.endog))
+
+        names = ['mu', 'sig'] + (['xi_l', 'xi_r'] if free_tails else [])
+        self.data.xnames = names
+        self.k_extra = len(names) - self.exog.shape[1]
+        self.df_model = float(len(names) - self.k_constant - self.k_extra)
+        self.df_resid = float(np.shape(self.endog)[0] - len(names))
 
         return super().fit(
             start_params=start_params,

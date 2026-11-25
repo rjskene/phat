@@ -8,11 +8,13 @@ change.
 ## [Unreleased]
 
 ### Fixed
-- `Garchcaster.dist` raised nothing when no distribution was set (the
-  `NotImplementedError` was constructed but not raised) and
-  `Garchcaster` kept `resids[:-maxlag:]` (everything but the last `maxlag`
+- `Garchcaster` kept `resids[:-maxlag:]` (everything but the last `maxlag`
   values) as its residual history when `use_backcast=False`; it now keeps the
-  last `maxlag` residuals.
+  last `maxlag` residuals. `Garchcaster.dist` is documented to return `None`
+  when no innovation distribution was given (Gaussian innovations); the dead
+  `NotImplementedError` expression there is gone.
+- `Phat.fit` results name their parameters `mu`, `sig`, `xi_l`, `xi_r`
+  (previously `const`, `par0`, ...) and report the right degrees of freedom.
 - `Phat.ppf` returned the weighted average of the two component quantile
   functions, which is not the quantile of a mixture. It is now the root of the
   mixture CDF (vectorised, safeguarded Newton with a guaranteed bracket). For
@@ -40,6 +42,21 @@ change.
   itself is unchanged (owner decision pending).
 
 ### Added
+- Test suite (`pytest`, 146 tests): density integrates to one, CDF monotone with
+  the right limits, `ppf(cdf(x)) = x`, sampler Kolmogorov-Smirnov against the
+  model CDF, moments and expected shortfall against quadrature, location-scale
+  behaviour, C1 continuity at the junctions, moment-existence rules, the
+  reference tables from the review, maximum-likelihood parameter recovery, a
+  Hill double-bootstrap regression on a committed text fixture
+  (`tests/fixtures/student_t3_n1500.csv`), and `Garchcaster` tests (array
+  constructor, GARCH recursion by hand, `arch` integration and a forecast smoke
+  test). An independent quadrature oracle lives in `tests/oracle.py`.
+- GitHub Actions workflow: ruff and mypy; pytest on Linux, macOS (Apple
+  Silicon) and Windows for Python 3.11-3.13 with the `dev` extras; and a
+  core-only job that installs nothing but NumPy and SciPy.
+- `two_tailed_hill_double_bootstrap(..., seed=...)` and
+  `phat.bootstrap.seed_bootstrap` make the resampling reproducible (the Numba
+  and pure-Python paths use different streams).
 - `Phat.sf`, `logsf`, `logcdf`, `logpdf` computed from the GPD and Gaussian
   pieces directly, finite and accurate far into both tails (`sf` was `1 - cdf`).
 - `Phat.isf`, `Phat.stats`, `Phat.expected_shortfall(q, tail=...)` (alias
@@ -63,9 +80,14 @@ change.
 - Project URL corrected to `https://github.com/rjskene/phat` and the licence
   classifier to MIT, matching `LICENSE`.
 - `phat.tseries` and `phat.bootstrap` import without Numba, `arch`, tqdm,
-  pandas or matplotlib: the JIT decorators fall back to plain Python, the
-  `arch` `isinstance` checks are skipped, the progress bar becomes a plain
-  `range`, and matplotlib is imported inside the plotting methods.
+  pandas or matplotlib: the JIT decorators fall back to plain Python, fitted
+  `arch` and `pmdarima` models are recognised by duck typing (neither package
+  is imported), the progress bar becomes a plain `range`, and matplotlib is
+  imported inside the plotting methods.
+- Source is formatted to pass `ruff` (E, F, W, I, B, UP) and `mypy` (lenient:
+  implicit Optional allowed, `phat.tseries` errors ignored until the API pass;
+  `phat.learn` and `phat.bootstrap.tf` are excluded pending the owner's
+  decision on PhatNet).
 - `Garchcaster` with no innovation distribution draws Gaussian innovations with
   `numpy.random.default_rng(seed)` instead of a Numba loop that ignored `seed`.
 - `PhatFit` moved to the new module `phat.fit`, which is the only module that
@@ -95,6 +117,9 @@ change.
   `arrayarize` accepts any object with a `to_numpy` method.
 
 ### Removed
+- `tests/test_garchcast.py` and its nine pickled fixtures (fitted `arch` and
+  `pmdarima` objects from 2021 that no current library version can unpickle).
+  The replacement fits the model from `tests/yelp_returns.csv` at test time.
 - `phat/thold.py`, which installed the R package `POT` at import time and was
   listed in `.gitignore` while still tracked. It was never exported by the
   package.

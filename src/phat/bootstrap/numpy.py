@@ -19,14 +19,16 @@ Numba, when installed, compiles the inner loops; tqdm, when installed, shows a
 progress bar. Neither is required.
 """
 
-from typing import Iterable, Union, Tuple
+from collections.abc import Iterable
+from typing import Union
+
 import numpy as np
 
 try:
     import numba as nb
     _njit = nb.njit
 except ImportError:  # pragma: no cover - exercised in the core-only CI job
-    nb = None
+    nb = None  # type: ignore[assignment]
 
     def _njit(*args, **kwargs):
         if len(args) == 1 and callable(args[0]) and not kwargs:
@@ -52,10 +54,10 @@ def A_qi(n1, k1):
 
 @_njit
 def moments_dbs_prefactor(xi_n, n1, k1):
-    """ 
+    """
     Function to calculate pre-factor used in moments
     double-bootstrap procedure.
-    
+
     Params
     -------
     xi_n: moments tail index estimate corresponding to
@@ -64,7 +66,7 @@ def moments_dbs_prefactor(xi_n, n1, k1):
             procedure.
     k1:   estimated optimal order statistic based on the 1st
             bootstrap sample.
-    
+
     Returns
     --------
     prefactor: constant used in estimation of the optimal
@@ -93,7 +95,7 @@ def moments_dbs_prefactor(xi_n, n1, k1):
             e = (1.-5*xi_n)*(1-6*xi_n)
             V = a*(b+c)/(d*e)
             return V
-    
+
     def b(xi_n, rho):
         if xi_n < rho:
             a1 = (1.-xi_n)*(1-2*xi_n)
@@ -134,7 +136,7 @@ def hill_est_for_xi(k,y):
 
 @_njit
 def second_moment(k, y):
-    t1 = np.cumsum(np.log(y[:-1])**2) / k 
+    t1 = np.cumsum(np.log(y[:-1])**2) / k
     t2 = 2*np.cumsum(np.log(y[:-1]))*np.log(y[1:]) / k
     t3 = np.log(y[1:])**2
     return t1 - t2 + t3
@@ -158,21 +160,21 @@ def amse(M1, M2):
 def hill_amse(k,y):
     M1 = hill_est_for_xi(k,y)
     M2 = second_moment(k,y)
-    return amse(M1,M2)    
+    return amse(M1,M2)
 
 @_njit
 def moments_amse(k, y):
     M1 = hill_est_for_xi(k, y)
-    M2 = second_moment(k,y)    
+    M2 = second_moment(k,y)
     M3 = third_moment(k, y)
-    xi_2 = M1 + 1 - 0.5*((1 - (M1*M1)/M2))**(-1)
+    xi_2 = M1 + 1 - 0.5*(1 - (M1*M1)/M2)**(-1)
     xi_3 = np.sqrt(0.5*M2) + 1 - (2/3)*(1 / (1 - M1*M2/M3))
     return (xi_2 - xi_3)**2
 
 @_njit
 def finder_loop(y, n, r, style='hill'):
     amses = np.zeros(n-1)
-    for i in range(r):
+    for _ in range(r):
         sample = np.random.choice(y, n, replace=False)
         sample = np.sort(sample)[::-1]
         k = np.arange(1,n)
@@ -230,12 +232,31 @@ def dbl_bs(y, t=.5, r=500, style='hill', A_type='qi'):
 
     return xi[k_star]
 
+@_njit
+def _seed_jit(seed):
+    np.random.seed(seed)
+
+
+def seed_bootstrap(seed:int) -> None:
+    """
+    Seed the random number generator used by the bootstrap resampling.
+
+    The resampling runs inside Numba-compiled code when Numba is installed,
+    which keeps its own random state; this seeds that state (and NumPy's global
+    state, which the pure-Python fallback uses). Results for a given seed differ
+    between the Numba and pure-Python paths.
+    """
+    np.random.seed(seed)
+    _seed_jit(seed)
+
+
 def two_tailed_hill_double_bootstrap(
-    values:Iterable[float], 
-    iters:int=10, 
+    values:Iterable[float],
+    iters:int=10,
     return_mean:bool=True,
     pbar_kwargs:dict=None,
-    ) -> Union[Tuple[Iterable], Tuple[float]]:
+    seed:int=None,
+    ) -> Union[tuple[float, float], tuple[np.ndarray, np.ndarray]]:
     """
     Hill double-bootstrap estimate of the tail shape ``xi`` on each side of the
     sample mean.
@@ -246,6 +267,7 @@ def two_tailed_hill_double_bootstrap(
     iters:          number of independent double-bootstrap runs to average
     return_mean:    return the mean over runs (``True``) or every run
     pbar_kwargs:    keyword arguments for the tqdm progress bar
+    seed:           seed for the bootstrap resampling (see :func:`seed_bootstrap`)
 
     Returns
     -------
@@ -253,6 +275,8 @@ def two_tailed_hill_double_bootstrap(
     """
     values = np.asarray(values, dtype=float)
     pbar_kwargs = {} if pbar_kwargs is None else pbar_kwargs
+    if seed is not None:
+        seed_bootstrap(seed)
 
     left = values[values < values.mean()]
     left = np.sort(-left)[::-1]
@@ -266,8 +290,8 @@ def two_tailed_hill_double_bootstrap(
         for i in trange(iters, **pbar_kwargs):
             shl[i] = dbl_bs(left, t=.5, r=500, style='hill', A_type='dani')
             shr[i] = dbl_bs(right, t=.5, r=500, style='hill', A_type='dani')
-    
+
     if return_mean:
-        return shl.mean(), shr.mean()
+        return float(shl.mean()), float(shr.mean())
     else:
         return shl, shr

@@ -102,4 +102,10 @@ ignore = [
 python_version = "3.11"
 files = ["src/phat"]
 ignore_missing_imports = true
+implicit_optional = true          # legacy `arg: float = None` signatures; tightened in the API pass
 exclude = ["src/phat/learn", "src/phat/bootstrap/tf.py"]
+
+[[tool.mypy.overrides]]
+# Garchcaster keeps its 0.0.x signatures until the API pass; errors there are informational.
+module = "phat.tseries"
+ignore_errors = true
