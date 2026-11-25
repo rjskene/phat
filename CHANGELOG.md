@@ -49,7 +49,7 @@ change.
   `p=` (starting price) and `n=` (paths) as keywords.
 
 ### Added
-- Test suite (`pytest`, 196 tests): density integrates to one, CDF monotone with
+- Test suite (`pytest`, 215 tests): density integrates to one, CDF monotone with
   the right limits, `ppf(cdf(x)) = x`, sampler Kolmogorov-Smirnov against the
   model CDF, moments and expected shortfall against quadrature, location-scale
   behaviour, C1 continuity at the junctions, moment-existence rules, the
@@ -91,28 +91,52 @@ change.
   paths reproducibly.
 
 ### Changed
+- **Argument and attribute names (old names deprecated, still working).**
+  Positional calls are unaffected: the order of every signature is the same.
+
+  | 0.0.x | now | where |
+  |---|---|---|
+  | `sig` | `sigma` | `Phat`, `CarBenRight`, `CarBenLeft`, `CarBenHybrid` |
+  | `xi_l`, `xi_r` | `xi_left`, `xi_right` | `Phat`, `Phat.fit`, `fit_phat` |
+  | `p` | `weights` | `Phat`, `PhatStack`, `Phat.fit` |
+  | `rtail=True` / `False` | `tail='right'` / `'left'` | `CarBenHybrid` |
+  | `iters`, `periods` | `n_paths`, `horizon` | `Garchcaster`, `Garchcaster.forecast`, `GarchcastResults` |
+  | `iters` | `n_runs` | `two_tailed_hill_double_bootstrap` |
+
+  - The old keywords and the old attributes (`dist.sig`, `dist.xi_l`,
+    `dist.xi_r`, `dist.p`, `cast.iters`, `cast.periods`, ...) keep working
+    for one release and emit a `DeprecationWarning` attributed to the
+    calling line. Passing an old and a new name together is a `TypeError`.
+  - `Phat.params` keys are `mu, sigma, xi_left, xi_right, a_left, a_right,
+    b_left, b_right`; the old keys (`sig`, `xi_l`, `a_l`, ...) still resolve
+    with a warning. `Phat.PARAM_NAMES` lists the new names.
+  - Fit results name their parameters `mu, sigma, xi_left, xi_right`
+    (`PhatFitResult.names`, `params_dict`, `fixed`, and the `statsmodels`
+    backend's `exog_names`).
+  - `phat.learn` (the TensorFlow module) is unchanged; it has its own names
+    and its future is an open decision.
 - **Sign convention of `xi` (breaking, with a one-release shim).** `xi` is
   now always the shape of the generalized Pareto tail: positive for a heavy
   tail, zero for an exponential tail, `-1 < xi < 0` for a bounded tail. The
   side is chosen separately, by `CarBenRight` / `CarBenLeft` or by
-  `CarBenHybrid(xi, mu, sig, rtail=True|False)`.
+  `CarBenHybrid(xi, mu, sigma, tail='right'|'left')`.
   - In 0.0.x `CarBenHybrid(-0.25, mu, sig)` meant "left tail with shape
     0.25". That call still returns the same object in this release but emits
     a `FutureWarning`; in the next release it will be a bounded *right* tail.
-    Write `CarBenHybrid(0.25, mu, sig, rtail=False)` or
-    `CarBenLeft(0.25, mu, sig)`.
-  - With `rtail` given, a negative `xi` is already the bounded tail on that
-    side. `CarBenHybrid(-0.25, mu, sig, rtail=False)` used to raise
+    Write `CarBenHybrid(0.25, mu, sigma, tail='left')` or
+    `CarBenLeft(0.25, mu, sigma)`.
+  - With a side given (`tail=`, or the deprecated `rtail=`), a negative
+    `xi` is already the bounded tail on that side. `CarBenHybrid(-0.25, mu, sig, rtail=False)` used to raise
     `ValueError` and `CarBenHybrid(-0.25, mu, sig, rtail=True)` used to
     return a left tail with shape 0.25.
-  - `Phat(mu, sig, xi_l, xi_r)` accepts `xi_l, xi_r > -1` (previously
+  - `Phat(mu, sigma, xi_left, xi_right)` accepts shapes `> -1` (previously
     `>= 0`). Every existing call is unchanged. A component with a negative
     shape has a GPD tail that ends at `a + b/|xi|`; the mixture stays
     supported on the whole line through the other component's Gaussian body.
     All methods are checked against the quadrature oracle for bounded tails.
     `Phat.fit` still searches `0 <= xi <= 10`.
-  - `CarBenHybrid` has an explicit signature `(xi, mu, sig=None, a=None,
-    rtail=True)` instead of `*args, **kwargs`.
+  - `CarBenHybrid` has an explicit signature `(xi, mu, sigma=None, a=None,
+    tail='right')` instead of `*args, **kwargs`.
 - Packaging moved to a single `pyproject.toml` (`setup.py`, `setup.cfg`,
   `requirements.txt` and `docs/_dev_requirements.txt` removed). Core
   dependencies are `numpy>=1.25` and `scipy>=1.11` only; `requires-python`

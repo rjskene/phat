@@ -10,18 +10,18 @@ class TestPhatStack:
 
     @pytest.fixture
     def pstack(self):
-        mu, sig, xil, xir = 4, .25, .3, .35
-        phat1 = ph.Phat(mu, sig, xil, xir)
+        mu, sigma, xil, xir = 4, .25, .3, .35
+        phat1 = ph.Phat(mu, sigma, xil, xir)
 
-        mu, sig, xil, xir = -2, .35, .25, .45
-        phat2 = ph.Phat(mu, sig, xil, xir)
+        mu, sigma, xil, xir = -2, .35, .25, .45
+        phat2 = ph.Phat(mu, sigma, xil, xir)
 
-        mu, sig, xil, xir = -1, .9, .45, .2
-        phat3 = ph.Phat(mu, sig, xil, xir)
+        mu, sigma, xil, xir = -1, .9, .45, .2
+        phat3 = ph.Phat(mu, sigma, xil, xir)
 
         p = np.array([.22,.5,.28])
 
-        return ph.PhatStack(phat1, phat2, phat3, p=p)
+        return ph.PhatStack(phat1, phat2, phat3, weights=p)
 
     @pytest.fixture
     def n(self):
@@ -42,4 +42,4 @@ class TestPhatStack:
 
         assert len(rvs) == 2
         assert rvs[1].sum() == n
-        assert np.isclose(pstack.p, rvs[1] / rvs[1].sum(), rtol=.01).all()
+        assert np.isclose(pstack.weights, rvs[1] / rvs[1].sum(), rtol=.01).all()

@@ -32,14 +32,14 @@ def test_density_integrates_to_one(pair):
 
 def test_pdf_cdf_match_oracle(pair):
     dist, oracle = pair
-    x = np.linspace(dist.mu - 8 * dist.sig, dist.mu + 8 * dist.sig, 201)
+    x = np.linspace(dist.mu - 8 * dist.sigma, dist.mu + 8 * dist.sigma, 201)
     np.testing.assert_allclose(dist.pdf(x), oracle.pdf(x), rtol=1e-12, atol=1e-300)
     np.testing.assert_allclose(dist.cdf(x), oracle.cdf(x), rtol=1e-12)
 
 
 def test_cdf_monotone_with_limits(pair):
     dist, _ = pair
-    x = np.linspace(dist.mu - 50 * dist.sig, dist.mu + 50 * dist.sig, 2001)
+    x = np.linspace(dist.mu - 50 * dist.sigma, dist.mu + 50 * dist.sigma, 2001)
     c = dist.cdf(x)
     assert np.all(np.diff(c) >= 0)
     assert dist.cdf(-np.inf) == 0.0
@@ -55,7 +55,7 @@ def test_ppf_inverts_cdf(pair):
     np.testing.assert_allclose(dist.cdf(x), q, rtol=1e-9, atol=1e-14)
     # round trip through whichever of cdf / sf is the small probability, so the
     # check is well conditioned far out on both sides
-    xs = np.linspace(dist.mu - 6 * dist.sig, dist.mu + 6 * dist.sig, 31)
+    xs = np.linspace(dist.mu - 6 * dist.sigma, dist.mu + 6 * dist.sigma, 31)
     median = dist.ppf(0.5)
     lo, hi = xs[xs <= median], xs[xs > median]
     np.testing.assert_allclose(dist.ppf(dist.cdf(lo)), lo, rtol=1e-9, atol=1e-9)
@@ -87,33 +87,34 @@ def test_isf_is_upper_quantile(pair):
 
 def test_sf_accurate_in_far_tail(pair):
     dist, oracle = pair
-    if min(dist.xi_l, dist.xi_r) < 0:
+    if min(dist.xi_left, dist.xi_right) < 0:
         pytest.skip('a bounded GPD tail has no mass this far out')
     # 1 - cdf(x) is exactly 0 out here; sf must still carry the GPD tail.
-    x = dist.mu + dist.sig * np.array([1e3, 1e5, 1e7])
+    x = dist.mu + dist.sigma * np.array([1e3, 1e5, 1e7])
     sf = dist.sf(x)
     assert np.all(sf > 0)
     assert np.all(np.diff(sf) < 0)
     # right component tail, closed form via the oracle's component dictionary
     R = oracle.R
-    expected = dist.p[1] * st.genpareto.sf(x, R["xi"], loc=oracle.a_r, scale=R["b"]) / R["gam"]
+    expected = dist.weights[1] * st.genpareto.sf(x, R["xi"], loc=oracle.a_r, scale=R["b"]) / R["gam"]
     # the left component adds only a Gaussian remnant, negligible out here
     np.testing.assert_allclose(sf, expected, rtol=1e-10)
-    xl = dist.mu - dist.sig * np.array([1e3, 1e5, 1e7])
+    xl = dist.mu - dist.sigma * np.array([1e3, 1e5, 1e7])
     cdf = dist.cdf(xl)
     L = oracle.L
-    a_mirror = dist.mu + dist.sig * L["s"]
-    expected_l = dist.p[0] * st.genpareto.sf(2 * dist.mu - xl, L["xi"], loc=a_mirror, scale=L["b"]) / L["gam"]
+    a_mirror = dist.mu + dist.sigma * L["s"]
+    mirror_sf = st.genpareto.sf(2 * dist.mu - xl, L["xi"], loc=a_mirror, scale=L["b"])
+    expected_l = dist.weights[0] * mirror_sf / L["gam"]
     np.testing.assert_allclose(cdf, expected_l, rtol=1e-10)
 
 
 def test_log_functions(pair):
     dist, _ = pair
-    x = np.linspace(dist.mu - 30 * dist.sig, dist.mu + 30 * dist.sig, 301)
+    x = np.linspace(dist.mu - 30 * dist.sigma, dist.mu + 30 * dist.sigma, 301)
     np.testing.assert_allclose(dist.logpdf(x), np.log(dist.pdf(x)), rtol=1e-12, atol=1e-14)
     np.testing.assert_allclose(dist.logcdf(x), np.log(dist.cdf(x)), rtol=1e-12, atol=1e-14)
     np.testing.assert_allclose(dist.logsf(x), np.log(dist.sf(x)), rtol=1e-12, atol=1e-14)
-    far = dist.mu + dist.sig * 1e12
+    far = dist.mu + dist.sigma * 1e12
     assert np.isfinite(dist.logsf(far))
     assert np.isfinite(dist.logpdf(far))
     assert np.isfinite(dist.logcdf(-far))
@@ -122,7 +123,7 @@ def test_log_functions(pair):
 
 def test_density_and_derivative_continuous_at_junctions(pair):
     dist, _ = pair
-    h = 1e-6 * dist.sig
+    h = 1e-6 * dist.sigma
     for a in dist.junctions:
         left, right = dist.pdf(a - h), dist.pdf(a + h)
         assert left == pytest.approx(right, rel=1e-5)
@@ -133,7 +134,7 @@ def test_density_and_derivative_continuous_at_junctions(pair):
 
 def test_moments_match_quadrature(pair):
     dist, oracle = pair
-    if max(dist.xi_l, dist.xi_r) < 0.5:
+    if max(dist.xi_left, dist.xi_right) < 0.5:
         assert dist.mean() == pytest.approx(oracle.mean(), rel=1e-7, abs=1e-9)
         assert dist.var() == pytest.approx(oracle.var(), rel=1e-7)
         m, v = dist.stats()
@@ -145,9 +146,9 @@ def test_moments_match_quadrature(pair):
 
 def test_component_moments_with_location_and_scale():
     # The old code passed unstandardised bounds to truncnorm.
-    for mu, sig, xi in [(0, 1, 0.2), (2, 2, 0.2), (-1, 0.3, 0.0)]:
-        right = ph.CarBenRight(xi, mu, sig)
-        left = ph.CarBenLeft(xi, mu, sig)
+    for mu, sigma, xi in [(0, 1, 0.2), (2, 2, 0.2), (-1, 0.3, 0.0)]:
+        right = ph.CarBenRight(xi, mu, sigma)
+        left = ph.CarBenLeft(xi, mu, sigma)
         a = right.a
 
         def m(k, f, a=a):
@@ -162,7 +163,7 @@ def test_component_moments_with_location_and_scale():
 
 
 @pytest.mark.parametrize(
-    "xi_l, xi_r, mean, var",
+    "xi_left, xi_right, mean, var",
     [
         (0.2, 1.0, np.inf, np.inf),
         (1.0, 0.2, -np.inf, np.inf),
@@ -172,8 +173,8 @@ def test_component_moments_with_location_and_scale():
         (0.2, 0.7, None, np.inf),
     ],
 )
-def test_moment_existence(xi_l, xi_r, mean, var):
-    dist = ph.Phat(0, 1, xi_l, xi_r)
+def test_moment_existence(xi_left, xi_right, mean, var):
+    dist = ph.Phat(0, 1, xi_left, xi_right)
     got_mean = dist.mean()
     if mean is None:
         assert np.isfinite(got_mean)
@@ -187,15 +188,15 @@ def test_moment_existence(xi_l, xi_r, mean, var):
 
 def test_location_scale_family():
     base = ph.Phat(0, 1, 0.2, 0.25)
-    mu, sig = 1.3, 2.5
-    dist = ph.Phat(mu, sig, 0.2, 0.25)
+    mu, sigma = 1.3, 2.5
+    dist = ph.Phat(mu, sigma, 0.2, 0.25)
     q = np.array([0.001, 0.1, 0.5, 0.9, 0.999])
-    np.testing.assert_allclose(dist.ppf(q), mu + sig * base.ppf(q), rtol=1e-10)
+    np.testing.assert_allclose(dist.ppf(q), mu + sigma * base.ppf(q), rtol=1e-10)
     z = np.linspace(-6, 6, 25)
-    np.testing.assert_allclose(dist.pdf(mu + sig * z), base.pdf(z) / sig, rtol=1e-12)
-    np.testing.assert_allclose(dist.cdf(mu + sig * z), base.cdf(z), rtol=1e-12)
-    assert dist.mean() == pytest.approx(mu + sig * base.mean(), rel=1e-12)
-    assert dist.var() == pytest.approx(sig**2 * base.var(), rel=1e-12)
+    np.testing.assert_allclose(dist.pdf(mu + sigma * z), base.pdf(z) / sigma, rtol=1e-12)
+    np.testing.assert_allclose(dist.cdf(mu + sigma * z), base.cdf(z), rtol=1e-12)
+    assert dist.mean() == pytest.approx(mu + sigma * base.mean(), rel=1e-12)
+    assert dist.var() == pytest.approx(sigma**2 * base.var(), rel=1e-12)
 
 
 def test_expected_shortfall_matches_quadrature(pair):
@@ -203,7 +204,7 @@ def test_expected_shortfall_matches_quadrature(pair):
     for q in (0.01, 0.05, 0.25):
         es_l = dist.expected_shortfall(q, tail="left")
         assert es_l == pytest.approx(oracle.es_lower(q), rel=1e-7, abs=1e-9)
-        if dist.xi_r < 1:
+        if dist.xi_right < 1:
             es_r = dist.expected_shortfall(q, tail="right")
             assert es_r == pytest.approx(oracle.es_upper(q), rel=1e-7, abs=1e-9)
     np.testing.assert_allclose(
@@ -218,10 +219,10 @@ def test_expected_shortfall_infinite_for_heavy_right_tail():
     assert np.isfinite(dist.expected_shortfall(0.05, tail="left"))
 
 
-def test_mixture_weight_p():
-    dist = ph.Phat(0, 1, 0.2, 0.25, p=(0.3, 0.7))
+def test_mixture_weights():
+    dist = ph.Phat(0, 1, 0.2, 0.25, weights=(0.3, 0.7))
     oracle = OraclePhat(0, 1, 0.2, 0.25, p=(0.3, 0.7))
-    np.testing.assert_array_equal(dist.p, [0.3, 0.7])
+    np.testing.assert_array_equal(dist.weights, [0.3, 0.7])
     x = np.linspace(-5, 5, 51)
     np.testing.assert_allclose(dist.pdf(x), oracle.pdf(x), rtol=1e-12)
     np.testing.assert_allclose(dist.ppf([0.01, 0.5, 0.99]), oracle.ppf([0.01, 0.5, 0.99]), rtol=1e-9)
@@ -230,7 +231,7 @@ def test_mixture_weight_p():
     x = dist.rvs(100_000, random_state=1)
     assert st.kstest(x, dist.cdf).pvalue > 0.01
     with pytest.raises(ValueError):
-        ph.Phat(0, 1, 0.2, 0.25, p=(0.3, 0.6))
+        ph.Phat(0, 1, 0.2, 0.25, weights=(0.3, 0.6))
 
 
 def test_parameter_validation():
@@ -240,7 +241,7 @@ def test_parameter_validation():
         ph.Phat(0, 1, -1.0, 0.25)       # the GPD shape must exceed -1
     with pytest.raises(ValueError):
         ph.Phat(0, 1, 0.25, -1.5)
-    assert ph.Phat(0, 1, -0.2, 0.25).xi_l == -0.2   # a bounded left tail is a valid shape
+    assert ph.Phat(0, 1, -0.2, 0.25).xi_left == -0.2   # a bounded left tail is a valid shape
 
 
 def test_scalar_in_scalar_out():
@@ -260,7 +261,7 @@ def test_std_rvs_has_unit_scale():
 
 def test_phatstack_rvs_splits_and_regimes():
     p1, p2 = ph.Phat(4, 0.25, 0.3, 0.35), ph.Phat(-2, 0.35, 0.25, 0.45)
-    stack = ph.PhatStack(p1, p2, p=[0.25, 0.75])
+    stack = ph.PhatStack(p1, p2, weights=[0.25, 0.75])
     y, splits = stack.rvs((1000, 30), random_state=0, return_splits=True)
     assert y.shape == (1000, 30)
     assert splits.sum() == 1000
@@ -282,8 +283,8 @@ def test_bounded_tail_ends_at_the_gpd_endpoint():
     assert dist.right.pdf(end + 1e-9) == 0 and dist.right.sf(end + 1e-9) == 0
     assert dist.right.pdf(end - 1e-3) > 0
     x = end + 0.5
-    assert dist.pdf(x) == pytest.approx(dist.p[0] * dist.left.pdf(x), rel=1e-12)
-    assert dist.sf(x) == pytest.approx(dist.p[0] * dist.left.sf(x), rel=1e-12)
+    assert dist.pdf(x) == pytest.approx(dist.weights[0] * dist.left.pdf(x), rel=1e-12)
+    assert dist.sf(x) == pytest.approx(dist.weights[0] * dist.left.sf(x), rel=1e-12)
     draws = dist.right.rvs(50_000, random_state=np.random.default_rng(5))
     assert draws.max() <= end
 

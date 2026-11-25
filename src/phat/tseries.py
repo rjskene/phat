@@ -14,6 +14,7 @@ if TYPE_CHECKING:  # optional packages, imported for annotations only
     import pmdarima
     from arch.univariate.base import ARCHModelResult
 
+from phat._compat import renamed_attribute, renamed_kwargs
 from phat.dists import Phat, _rng
 from phat.utils import PriceSim, argsetter, arrayarize
 
@@ -311,10 +312,14 @@ class GarchcastResults:
 
     Parameters
     -----------
-    values:     np.ndarray; 2d iters x periods array of values from Garchcast projection
-    vols:       np.ndarray; 2d iters x periods array of forecast volatilities
-    resids:     np.ndarray; 2d iters x periods array of forecast residuals relative to ARMA-GARCH
+    values:     np.ndarray; 2d n_paths x horizon array of values from Garchcast projection
+    vols:       np.ndarray; 2d n_paths x horizon array of forecast volatilities
+    resids:     np.ndarray; 2d n_paths x horizon array of forecast residuals relative to ARMA-GARCH
     """
+    # 0.0.x attribute names
+    iters = renamed_attribute('n_paths')
+    periods = renamed_attribute('horizon')
+
     def __init__(self,
         values:np.ndarray,
         vols:np.ndarray,
@@ -325,7 +330,7 @@ class GarchcastResults:
         self.resids = resids
         self._sim: PriceSim | None = None
 
-        self.iters, self.periods = values.shape
+        self.n_paths, self.horizon = values.shape
 
     @property
     def rets(self) -> np.ndarray:
@@ -341,12 +346,12 @@ class GarchcastResults:
             raise ValueError('You must plot a price simulation or call `_make_sim` directly')
         return self._sim
 
-    @argsetter(['iters', 'periods'])
-    def _make_sim(self, iters:int, periods:int, p:float=1) -> PriceSim:
+    @argsetter(['n_paths', 'horizon'])
+    def _make_sim(self, n_paths:int, horizon:int, p:float=1) -> PriceSim:
         """
         Creates a price simulator used to generate images
         """
-        self._sim = PriceSim(p0=p, periods=periods, n=iters)
+        self._sim = PriceSim(p0=p, periods=horizon, n=n_paths)
         return self._sim
 
     def plot(
@@ -417,10 +422,10 @@ class GarchcastResults:
         rng = _rng(kwargs.pop('random_state', None))
 
         all_axes = []
-        for i in rng.choice(self.iters, size=min(int(n), self.iters), replace=False):
-            # keyword call: argsetter maps positional arguments onto (p0, rets, periods) only
+        for i in rng.choice(self.n_paths, size=min(int(n), self.n_paths), replace=False):
+            # keyword call: argsetter maps positional arguments onto (p0, rets, horizon) only
             _, __, chart_axes = sim.sim(
-                rets=1 + self.values[i]/100, periods=self.periods, show_chart=True, axes=axes, **kwargs
+                rets=1 + self.values[i]/100, periods=self.horizon, show_chart=True, axes=axes, **kwargs
             )
             all_axes.append(chart_axes)
 
@@ -454,18 +459,18 @@ Params:
     garch: instance of arch ARCHModelResult class OR iterable of floats
         either provide an ARCHModelResult instance or the params derived from any garch process
     y:  float or iterable of floats
-        iters x periods standardized residuals after filtering an ARMA-GARCH. Only required if
+        history of standardized residuals after filtering an ARMA-GARCH. Only required if
         garch is not ARCHModelResult type.
     vols: float or iterable of floats
-        iters x periods conditional volatilities resulting from an ARMA-GARCH process. Only required if
+        history of conditional volatilities resulting from an ARMA-GARCH process. Only required if
         garch is not ARCHModelResult type.
     resids: float or iterable of floats
-        iters x periods residuals after filtering an ARMA-GARCH. Only required if garch is not an
+        history of residuals after filtering an ARMA-GARCH. Only required if garch is not an
         ARCHModelResult.
-    iters: int
-        number of iterations of forecast
-    periods: int
-        number of periods in each iteration of the forecast
+    n_paths: int
+        number of simulated paths
+    horizon: int
+        number of periods forecast along each path
     dist: Phat or scipy rv_frozen class
         distribution used to generate residuals
     use_backcast: bool
@@ -473,14 +478,19 @@ Params:
     """
     GARCH_HAS_MEAN_PROCESS = False
 
+    # 0.0.x attribute names
+    iters = renamed_attribute('n_paths')
+    periods = renamed_attribute('horizon')
+
+    @renamed_kwargs(iters='n_paths', periods='horizon')
     def __init__(self,
         garch:Union[ARCHModelResult, Iterable[float], None]=None,
         arma:Union[pmdarima.ARIMA, Iterable[float], None]=None,
         y:Iterable[float] | None=None,
         vols:Iterable[float] | None=None,
         resids:Iterable[float] | None=None,
-        iters:int=1,
-        periods:int=252,
+        n_paths:int=1,
+        horizon:int=252,
         order:tuple[int, ...] | None=None,
         dist:ALLOWED_DISTS | None=None,
         use_backcast:bool=True,
@@ -553,8 +563,8 @@ Params:
             vols_arr = arrayarize(vols).astype(float)
             resids_arr = arrayarize(resids).astype(float)
 
-        self.periods = periods
-        self.iters = iters
+        self.horizon = horizon
+        self.n_paths = n_paths
 
         self.y_hist = y_arr[-self.maxlag:]
         self.vols_hist = vols_arr[-self.maxlag:]
@@ -569,10 +579,10 @@ Params:
         """Innovation distribution; ``None`` means standard Gaussian innovations."""
         return self._dist
 
-    @argsetter(['iters', 'periods'], flat=True)
+    @argsetter(['n_paths', 'horizon'], flat=True)
     def _sample_innovs(self,
-        iters:int | None=None,
-        periods:int | None=None,
+        n_paths:int | None=None,
+        horizon:int | None=None,
         dist:ALLOWED_DISTS | None=None,
         seed:Any=None,
         random_state:Any=None,
@@ -587,8 +597,8 @@ Params:
 
         Params
         -------
-        iters:          int; number of iterations of forecast
-        periods:        int; number of periods in each iteration of the forecast
+        n_paths:        int; number of simulated paths
+        horizon:        int; number of periods forecast along each path
         dist:           Phat or scipy rv_frozen class; distribution used to generate residuals
         random_state:   ``None``, int seed, ``numpy.random.Generator`` or ``RandomState``
         seed:           alias of ``random_state``
@@ -597,7 +607,7 @@ Params:
         -------
         innovs:         np.ndarray
         """
-        shape = (int(iters), int(periods))  # type: ignore[arg-type]  # filled by argsetter
+        shape = (int(n_paths), int(horizon))  # type: ignore[arg-type]  # filled by argsetter
         rng = _rng(random_state if random_state is not None else seed)
         dist = dist if dist is not None else self._dist
         if dist is None:
@@ -621,8 +631,8 @@ Params:
         vols:np.ndarray,
         resids:np.ndarray,
         innovs:np.ndarray,
-        iters:int,
-        periods:int,
+        n_paths:int,
+        horizon:int,
         mean_args:tuple,
         vol_args:tuple,
         ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -645,21 +655,21 @@ Params:
         y:              np.ndarray; historical standardized residuals of ARMA-GARCH fit, last `maxlag` periods
         vols:           np.ndarray; historical volatilities of ARMA-GARCH fit up to `maxlag` periods ago
         resids:         np.ndarray; historical residuals of ARMA-GARCH fit up to `maxlag` periods ago
-        innovs:         iters x periods np.ndarray of garch residuals
-        iters:          int; number of iterations of forecast
-        periods:        int; number of periods in each iteration of the forecast
+        innovs:         n_paths x horizon np.ndarray of garch residuals
+        n_paths:        int; number of simulated paths
+        horizon:        int; number of periods forecast along each path
         dist:           Phat or scipy rv_frozen class; distribution used to generate residuals
         mean_args:      tuple; properties of the mean process use in `_arma_one_step`
         vol_args:       tuple; properties of the vol process use in `_garch_one_step`
         """
-        y_ = np.zeros((iters, periods))
-        vols_ = np.zeros((iters, periods))
-        resids_ = np.zeros((iters, periods))
-        for i in range(iters):
+        y_ = np.zeros((n_paths, horizon))
+        vols_ = np.zeros((n_paths, horizon))
+        resids_ = np.zeros((n_paths, horizon))
+        for i in range(n_paths):
             y_i = y.copy()
             vols_i = vols.copy()
             resids_i = resids.copy()
-            for t in range(periods):
+            for t in range(horizon):
                 mu_t = _arma_one_step(y_i, resids_i, *mean_args)
                 var_t, resid_t = _garch_one_step(vols_i, resids_i, innovs[i, t], *vol_args)
 
@@ -680,10 +690,11 @@ Params:
                 #     print (i, t, mu_t, resid_t, innovs[i,t], y, vols, resids)
         return y_, vols_, resids_
 
-    @argsetter(['dist', 'iters', 'periods'], flat=True)
+    @renamed_kwargs(iters='n_paths', periods='horizon')
+    @argsetter(['dist', 'n_paths', 'horizon'], flat=True)
     def forecast(self,
-        iters:int | None=None,
-        periods:int | None=None,
+        n_paths:int | None=None,
+        horizon:int | None=None,
         dist:ALLOWED_DISTS | None=None,
         innovs:Iterable[float] | None=None,
         seed:Any=None,
@@ -693,19 +704,19 @@ Params:
         User-facing interface with forecast generator
 
         Params:
-            iters: int
-                number of iterations of forecast
-            periods: int
-                number of periods in each iteration of the forecast
+            n_paths: int
+                number of simulated paths
+            horizon: int
+                number of periods forecast along each path
             dist: Phat or scipy rv_frozen class
                 distribution used to generate residuals
             innovs: np.ndarray
-                iters x periods of garch residuals
+                n_paths x horizon of garch residuals
             random_state: None, int seed, numpy.random.Generator or RandomState
                 for the innovations if `innovs` is not provided
             seed: alias of `random_state`
         """
-        n_iters, n_periods = int(iters), int(periods)  # type: ignore[arg-type]  # filled by argsetter
+        n_iters, n_periods = int(n_paths), int(horizon)  # type: ignore[arg-type]  # filled by argsetter
         if innovs is None:
             innovs_arr = self._sample_innovs(
                 n_iters, n_periods, dist=dist, seed=seed, random_state=random_state

@@ -27,8 +27,8 @@ class TestGroup:
 
     @pytest.fixture
     def cbl(self, l_params):
-        xi, mu, sig = l_params          # l_params carries the 0.0.x "negative xi = left" form
-        return ph.CarBenHybrid(-xi, mu, sig, rtail=False)
+        xi, mu, sigma = l_params          # l_params carries the 0.0.x "negative xi = left" form
+        return ph.CarBenHybrid(-xi, mu, sigma, tail='left')
 
     def is_right(self, cb):
         return isinstance(cb, ph.dists.CarBenRight)
@@ -37,17 +37,17 @@ class TestGroup:
         params = r_params if self.is_right(cb) else l_params
         assert cb.xi == params[0] if self.is_right(cb) else -params[0]
         assert cb.mu == params[1]
-        assert cb.sig == params[2]
+        assert cb.sigma == params[2]
 
     def test_correct_body_params(self, cb, l_params):
         assert cb.body.args == l_params[1:3]
 
-    def test_rtail_keyword_for_left(self, cb, r_params):
+    def test_tail_keyword_for_left(self, cb, r_params):
         if self.is_right(cb):
-            carb = ph.CarBenHybrid(*r_params, rtail=False)
+            carb = ph.CarBenHybrid(*r_params, tail='left')
             assert isinstance(carb, ph.dists.CarBenLeft)
             assert carb.mu == cb.mu
-            assert carb.sig == cb.sig
+            assert carb.sigma == cb.sigma
             assert carb.xi == cb.xi
 
     def test_gamma(self, cb):
@@ -94,7 +94,7 @@ class TestGroup:
     def test_construct_from_junction(self, cb):
         # Before the fix `_calc_b_w_a` returned (a - mu*xi)/sqrt(W) instead of (1+xi)|a-mu|/W.
         other = type(cb)(cb.xi, cb.mu, a=cb.a)
-        assert np.isclose(other.sig, cb.sig)
+        assert np.isclose(other.sigma, cb.sigma)
         assert np.isclose(other.b, cb.b)
         assert np.isclose(other.pdf(cb.a + 1), cb.pdf(cb.a + 1))
 

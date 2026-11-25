@@ -58,9 +58,9 @@ def argsetter(kws:Union[Iterable, str]='x', flat=False):
 def dotweight(func) -> Callable:
     """
     Takes the weighted average of values in the array `stack`
-    Weights provided by array `p`. average found via dot product.
+    Weights provided by array `weights`. average found via dot product.
 
-    Used as a wrapper for class methods: `p` must be an attribute of the class instance
+    Used as a wrapper for class methods: `weights` must be an attribute of the class instance
 
     Returns
     --------
@@ -70,10 +70,10 @@ def dotweight(func) -> Callable:
     def wrapper(self, *args, **kwargs) -> np.ndarray:
         stack = func(self, *args, **kwargs)
         if stack.ndim == 3:
-            p = np.tile(self.p, (stack.shape[0],stack.shape[1],1))
+            p = np.tile(self.weights, (stack.shape[0],stack.shape[1],1))
             return np.multiply(p, stack).sum(axis=2)
         else:
-            return (self.p @ stack)
+            return (self.weights @ stack)
 
     return wrapper
 

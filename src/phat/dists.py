@@ -16,6 +16,7 @@ import numpy as np
 import scipy.special as spec
 import scipy.stats as scist
 
+from phat._compat import AliasDict, renamed_attribute, renamed_kwargs
 from phat.utils import XTYPE, argsetter, arrayarize, sech_squared
 
 
@@ -149,32 +150,35 @@ class CarBenBase:
 
     * ``xi``:  shape of the generalized Pareto tail (``xi >= 0`` for a heavy tail)
     * ``mu``:  location of the Gaussian body
-    * ``sig``: scale of the Gaussian body. **Not** the standard deviation of the
+    * ``sigma``: scale of the Gaussian body. **Not** the standard deviation of the
       hybrid; see :meth:`std`.
 
     The two remaining GPD parameters are fixed by continuity of the density and
     its first derivative at the junction ``a``. With ``z = (1 + xi)^2 / (2 pi)``,
     ``s = sqrt(W(z))`` (``W`` the Lambert W function):
 
-    * junction          ``a = mu + s * sig``       (right tail; ``mu - s * sig`` left)
-    * GPD scale         ``b = sig * (1 + xi) / s``
+    * junction          ``a = mu + s * sigma``       (right tail; ``mu - s * sigma`` left)
+    * GPD scale         ``b = sigma * (1 + xi) / s``
     * normaliser        ``gamma = 1 + Phi(s)``
 
     so the Gaussian part carries mass ``Phi(s) / gamma`` and the GPD tail
-    ``1 / gamma``. Instead of ``sig`` the junction ``a`` may be supplied.
+    ``1 / gamma``. Instead of ``sigma`` the junction ``a`` may be supplied.
 
     Attributes
     ----------
-    body:   frozen ``scipy.stats.norm(mu, sig)``
+    body:   frozen ``scipy.stats.norm(mu, sigma)``
     tail:   frozen ``scipy.stats.genpareto`` (for the left tail: of the reflected variable)
     gamma:  normaliser; the density is (Gaussian or GPD) / gamma
-    s:      junction distance from ``mu`` in units of ``sig``
+    s:      junction distance from ``mu`` in units of ``sigma``
     """
 
+    sig = renamed_attribute('sigma')
+
+    @renamed_kwargs(sig='sigma')
     def __init__(self,
         xi: float,
         mu: float,
-        sig: float | None = None,
+        sigma: float | None = None,
         a: float | None = None,
         ) -> None:
         xi = float(xi)
@@ -183,26 +187,26 @@ class CarBenBase:
         self.xi = xi
         self.mu = float(mu)
 
-        provided = (sig is None, a is None)
+        provided = (sigma is None, a is None)
         if all(provided) or not any(provided):
-            raise ValueError('Please provide only one of `sig` or `a`')
-        elif sig is not None:
-            sig = float(sig)
-            if sig <= 0:
-                raise ValueError('`sig` must be positive')
-            self.sig = sig
-            self._given = 'sig'
+            raise ValueError('Please provide only one of `sigma` or `a`')
+        elif sigma is not None:
+            sigma = float(sigma)
+            if sigma <= 0:
+                raise ValueError('`sigma` must be positive')
+            self.sigma = sigma
+            self._given = 'sigma'
             self.a = self._calc_a()
         else:
             assert a is not None
             self.a = float(a)
             self._given = 'a'
-            self.sig = self._calc_sig()
-            if not self.sig > 0:
+            self.sigma = self._calc_sigma()
+            if not self.sigma > 0:
                 raise ValueError('`a` must lie on the tail side of `mu`')
         self.b = self._calc_b_w_sig()
 
-        self.body = scist.norm(self.mu, self.sig)
+        self.body = scist.norm(self.mu, self.sigma)
 
     # ---- fixed quantities -------------------------------------------------
     @property
@@ -223,7 +227,7 @@ class CarBenBase:
 
     @property
     def s(self) -> float:
-        """Junction distance from ``mu`` in units of ``sig``: ``sqrt(W(z))``."""
+        """Junction distance from ``mu`` in units of ``sigma``: ``sqrt(W(z))``."""
         return float(np.sqrt(self.W_z()))
 
     @property
@@ -242,18 +246,18 @@ class CarBenBase:
         return 1.0 / self.gamma
 
     def _calc_b_w_sig(self) -> float:
-        """Equation 7 in Carreau and Bengio: ``b = sig (1 + xi) / sqrt(W(z))``."""
-        return self.sig * (1 + self.xi) / self.s
+        """Equation 7 in Carreau and Bengio: ``b = sigma (1 + xi) / sqrt(W(z))``."""
+        return self.sigma * (1 + self.xi) / self.s
 
     def _calc_b_w_a(self) -> float:
-        """``b`` from the junction: ``sig = |a - mu| / s`` so ``b = (1 + xi) |a - mu| / W(z)``."""
+        """``b`` from the junction: ``sigma = |a - mu| / s`` so ``b = (1 + xi) |a - mu| / W(z)``."""
         return (1 + self.xi) * abs(self.a - self.mu) / self.W_z()
 
     # ---- defined by the right/left subclasses ----------------------------------
     def _calc_a(self) -> float:
         raise NotImplementedError
 
-    def _calc_sig(self) -> float:
+    def _calc_sigma(self) -> float:
         raise NotImplementedError
 
     def mean(self) -> float:
@@ -267,7 +271,7 @@ class CarBenBase:
 
     # ---- generic helpers --------------------------------------------------
     def _zscore(self, x: np.ndarray) -> np.ndarray:
-        return (x - self.mu) / self.sig
+        return (x - self.mu) / self.sigma
 
     def std(self) -> float:
         return float(np.sqrt(self.var()))
@@ -300,17 +304,23 @@ class CarBenRight(CarBenBase):
     Right-tailed CarBen hybrid: Gaussian for ``x <= a``, generalized Pareto for ``x > a``.
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    @renamed_kwargs(sig='sigma')
+    def __init__(self,
+        xi: float,
+        mu: float,
+        sigma: float | None = None,
+        a: float | None = None,
+        ) -> None:
+        super().__init__(xi, mu, sigma, a)
         self._tail = scist.genpareto(self.xi, loc=self.a, scale=self.b)
         self._phi_s = float(scist.norm.cdf(self.s))
         self._log_gamma = float(np.log(self.gamma))
 
     def _calc_a(self) -> float:
-        """Equation 8 in Carreau and Bengio: ``a = mu + sig sqrt(W(z))``."""
-        return self.mu + self.sig * self.s
+        """Equation 8 in Carreau and Bengio: ``a = mu + sigma sqrt(W(z))``."""
+        return self.mu + self.sigma * self.s
 
-    def _calc_sig(self) -> float:
+    def _calc_sigma(self) -> float:
         return (self.a - self.mu) / self.s
 
     # ---- distribution functions ---------------------------------------------
@@ -395,7 +405,7 @@ class CarBenRight(CarBenBase):
 
     def _truncated_body(self):
         """The Gaussian body conditioned on ``x <= a`` (bounds standardised, as SciPy requires)."""
-        return scist.truncnorm(-np.inf, self.s, loc=self.mu, scale=self.sig)
+        return scist.truncnorm(-np.inf, self.s, loc=self.mu, scale=self.sigma)
 
     def mean(self) -> float:
         """First moment; ``inf`` for ``xi >= 1``."""
@@ -417,13 +427,13 @@ class CarBenRight(CarBenBase):
     def _gauss_lower_partial(self, t: np.ndarray) -> np.ndarray:
         """``int_{-inf}^{min(t, a)} x phi(x) dx`` (un-normalised Gaussian part)."""
         z = np.minimum(self._zscore(t), self.s)
-        return self.mu * scist.norm.cdf(z) - self.sig * scist.norm.pdf(z)
+        return self.mu * scist.norm.cdf(z) - self.sigma * scist.norm.pdf(z)
 
     def _gauss_upper_partial(self, t: np.ndarray) -> np.ndarray:
         """``int_{min(t, a)}^{a} x phi(x) dx``."""
         z = np.minimum(self._zscore(t), self.s)
         body = self._phi_s - scist.norm.cdf(z)
-        return self.mu * body - self.sig * (scist.norm.pdf(self.s) - scist.norm.pdf(z))
+        return self.mu * body - self.sigma * (scist.norm.pdf(self.s) - scist.norm.pdf(z))
 
     def _gpd_lower_partial(self, t: np.ndarray) -> np.ndarray:
         """``int_{a}^{max(t, a)} x g(x) dx`` for the un-normalised GPD part; finite for every ``xi``."""
@@ -465,18 +475,24 @@ class CarBenLeft(CarBenBase):
     two sides cannot drift apart.
     """
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._mirror = CarBenRight(self.xi, self.mu, sig=self.sig)
+    @renamed_kwargs(sig='sigma')
+    def __init__(self,
+        xi: float,
+        mu: float,
+        sigma: float | None = None,
+        a: float | None = None,
+        ) -> None:
+        super().__init__(xi, mu, sigma, a)
+        self._mirror = CarBenRight(self.xi, self.mu, sigma=self.sigma)
         # Tail of the reflected variable -x, kept for backwards compatibility:
         # ``tail.pdf(-x)`` is the GPD density of the left tail at ``x``.
         self._tail = scist.genpareto(self.xi, loc=-self.a, scale=self.b)
 
     def _calc_a(self) -> float:
-        """Equation 8 with the sign of the second term flipped: ``a = mu - sig sqrt(W(z))``."""
-        return self.mu - self.sig * self.s
+        """Equation 8 with the sign of the second term flipped: ``a = mu - sigma sqrt(W(z))``."""
+        return self.mu - self.sigma * self.s
 
-    def _calc_sig(self) -> float:
+    def _calc_sigma(self) -> float:
         return (self.mu - self.a) / self.s
 
     def _reflect(self, x: XTYPE) -> np.ndarray:
@@ -529,7 +545,7 @@ class CarBenLeft(CarBenBase):
         return _scalar_or_array(2.0 * self.mu * self._mirror.cdf(r) - self._mirror.lower_partial_mean(r))
 
 
-_RTAIL_UNSET: Any = object()
+_UNSET: Any = object()
 
 
 class CarBenHybrid:
@@ -543,40 +559,64 @@ class CarBenHybrid:
             a bounded tail that ends at ``a + b / |xi|`` (``a - b / |xi|`` on
             the left). The sign of ``xi`` says nothing about the side.
     mu:     location of the Gaussian body
-    sig:    scale of the Gaussian body (or give the junction ``a`` instead)
+    sigma:  scale of the Gaussian body (or give the junction ``a`` instead)
     a:      junction between body and tail
-    rtail:  ``True`` (default) for a right tail, ``False`` for a left tail
+    tail:   ``'right'`` (default) or ``'left'``
 
     .. versionchanged:: 0.1
        ``xi`` is always the tail shape. In 0.0.x a negative ``xi`` meant "left
        tail with shape ``|xi|``". For one release that reading is kept, with a
-       ``FutureWarning``, when ``xi < 0`` is passed **without** ``rtail``;
-       pass ``rtail=False`` and a positive ``xi`` instead. With ``rtail``
-       given, a negative ``xi`` is already a bounded tail on that side.
+       ``FutureWarning``, when ``xi < 0`` is passed **without** a side; pass
+       ``tail='left'`` and a positive ``xi`` instead. With a side given, a
+       negative ``xi`` is already a bounded tail on that side.
+
+    .. deprecated:: 0.1
+       ``rtail=True|False`` (use ``tail='right'|'left'``) and ``sig`` (use
+       ``sigma``).
     """
 
+    @renamed_kwargs(sig='sigma')
     def __new__(cls,
         xi: float,
         mu: float,
-        sig: float | None = None,
+        sigma: float | None = None,
         a: float | None = None,
-        rtail: bool = _RTAIL_UNSET,
+        tail: str = _UNSET,
+        *,
+        rtail: bool = _UNSET,
         ) -> Any:
         xi = float(xi)
-        if rtail is _RTAIL_UNSET:
-            rtail = True
+        if isinstance(tail, (bool, np.bool_)):       # 0.0.x: rtail as fifth positional argument
+            if rtail is not _UNSET:
+                raise TypeError('CarBenHybrid() got both `tail` and `rtail` (deprecated)')
+            tail, rtail = _UNSET, bool(tail)
+        if rtail is not _UNSET:
+            if tail is not _UNSET:
+                raise TypeError('CarBenHybrid() got both `tail` and `rtail` (deprecated)')
+            tail = 'right' if rtail else 'left'
+            warnings.warn(
+                f"`rtail` is deprecated; use `tail={tail!r}`. "
+                'The old name will be removed in a future release.',
+                DeprecationWarning,
+                stacklevel=3,
+            )
+
+        if tail is _UNSET:
+            tail = 'right'
             if xi < 0:
                 warnings.warn(
-                    'CarBenHybrid(xi < 0) without `rtail` builds a left tail with shape |xi|, '
+                    'CarBenHybrid(xi < 0) without `tail` builds a left tail with shape |xi|, '
                     'as in phat-tails 0.0.x. From the next release `xi` is always the tail shape '
                     '(negative = bounded tail) and the default side is the right. '
-                    'Use CarBenHybrid(abs(xi), ..., rtail=False) or CarBenLeft(abs(xi), ...).',
+                    "Use CarBenHybrid(abs(xi), ..., tail='left') or CarBenLeft(abs(xi), ...).",
                     FutureWarning,
-                    stacklevel=2,
+                    stacklevel=3,
                 )
-                xi, rtail = -xi, False
+                xi, tail = -xi, 'left'
+        if tail not in ('left', 'right'):
+            raise ValueError("`tail` must be 'left' or 'right'")
 
-        return CarBenRight(xi, mu, sig, a) if rtail else CarBenLeft(xi, mu, sig, a)
+        return CarBenRight(xi, mu, sigma, a) if tail == 'right' else CarBenLeft(xi, mu, sigma, a)
 
 
 class Phat:
@@ -586,17 +626,22 @@ class Phat:
 
     Parameters
     ----------
-    mu:     location of the shared Gaussian body
-    sig:    scale of the shared Gaussian body. **Not** the standard deviation of
-            the Phat variable; see :meth:`std`. For ``xi_l = xi_r = 0.2`` the
-            standard deviation is about ``4.6 sig``.
-    xi_l:   shape of the left generalized Pareto tail, ``> -1``. Positive for a
-            heavy (power-law) tail, the case Phat is built for; zero for an
-            exponential tail; negative for a bounded GPD tail.
-    xi_r:   shape of the right generalized Pareto tail, same convention. Each
-            shape describes its own side: a fat left tail has ``xi_l > 0``.
-    p:      mixture weights ``(p_l, p_r)``, non-negative and summing to 1.
-            Default ``(0.5, 0.5)``.
+    mu:         location of the shared Gaussian body
+    sigma:      scale of the shared Gaussian body. **Not** the standard deviation
+                of the Phat variable; see :meth:`std`. For
+                ``xi_left = xi_right = 0.2`` the standard deviation is about
+                ``4.6 sigma``.
+    xi_left:    shape of the left generalized Pareto tail, ``> -1``. Positive for
+                a heavy (power-law) tail, the case Phat is built for; zero for an
+                exponential tail; negative for a bounded GPD tail.
+    xi_right:   shape of the right generalized Pareto tail, same convention. Each
+                shape describes its own side: a fat left tail has ``xi_left > 0``.
+    weights:    mixture weights ``(p_l, p_r)``, non-negative and summing to 1.
+                Default ``(0.5, 0.5)``.
+
+    .. deprecated:: 0.1
+       The 0.0.x names ``sig``, ``xi_l``, ``xi_r`` and ``p`` still work as
+       keywords and attributes and emit a ``DeprecationWarning``.
 
     Attributes
     ----------
@@ -605,82 +650,100 @@ class Phat:
 
     Notes
     -----
-    Density ``f = p_l f_L(x; xi_l) + p_r f_R(x; xi_r)``; the CDF is the same
-    weighted sum. The body between the two junctions ``a_l < a_r`` is Gaussian,
+    Density ``f = p_l f_L(x; xi_left) + p_r f_R(x; xi_right)``; the CDF is the same
+    weighted sum. The body between the two junctions ``a_left < a_right`` is Gaussian,
     but it carries only 18-28% of the mass for ``xi`` between 0 and 1 (see
     :attr:`body_mass`); outside a junction the density is a GPD tail plus the
-    Gaussian remnant of the other component. At ``xi_l = xi_r = 0`` the tails are
+    Gaussian remnant of the other component. At ``xi_left = xi_right = 0`` the tails are
     exponential, so Phat is not Gaussian.
 
     With a negative shape the GPD tail of that component ends at
-    ``a_r + b_r / |xi_r|`` (``a_l - b_l / |xi_l|`` on the left). The mixture is
-    still supported on the whole real line, because the other component's
+    ``a_right + b_right / |xi_right|`` (``a_left - b_left / |xi_left|`` on the
+    left). The mixture is still supported on the whole real line, because the
+    other component's
     Gaussian body extends past that endpoint; beyond it the density is that
     Gaussian remnant alone.
 
-    The mean exists for ``max(xi_l, xi_r) < 1`` and the variance for
-    ``max(xi_l, xi_r) < 1/2``; beyond those thresholds :meth:`mean` returns
+    The mean exists for ``max(xi_left, xi_right) < 1`` and the variance for
+    ``max(xi_left, xi_right) < 1/2``; beyond those thresholds :meth:`mean` returns
     ``inf``/``-inf``/``nan`` and :meth:`var` returns ``inf``.
 
     The mixing of a hybrid Pareto with its reflection was proposed and used by
     Carreau (2007, PhD thesis, Universite de Montreal, sections 3.2 and 4.5).
     """
-    PARAM_NAMES = ['mu', 'sig', 'xi_l', 'xi_r', 'a_l', 'a_r', 'b_l', 'b_r']
+    PARAM_NAMES = ['mu', 'sigma', 'xi_left', 'xi_right', 'a_left', 'a_right', 'b_left', 'b_right']
 
+    _OLD_PARAM_NAMES = {
+        'sig': 'sigma', 'xi_l': 'xi_left', 'xi_r': 'xi_right',
+        'a_l': 'a_left', 'a_r': 'a_right', 'b_l': 'b_left', 'b_r': 'b_right',
+    }
+
+    # 0.0.x attribute names
+    sig = renamed_attribute('sigma')
+    xi_l = renamed_attribute('xi_left')
+    xi_r = renamed_attribute('xi_right')
+    p = renamed_attribute('weights')
+
+    @renamed_kwargs(sig='sigma', xi_l='xi_left', xi_r='xi_right', p='weights')
     def __init__(
-        self, mu: float, sig: float, xi_l: float, xi_r: float, p: Iterable = None
+        self,
+        mu: float,
+        sigma: float,
+        xi_left: float,
+        xi_right: float,
+        weights: Iterable[float] | None = None,
         ) -> None:
-        mu, sig, xi_l, xi_r = (float(v) for v in (mu, sig, xi_l, xi_r))
-        if not sig > 0:
-            raise ValueError('`sig` must be positive')
-        if xi_l <= -1 or xi_r <= -1:
-            raise ValueError('`xi_l` and `xi_r` must be greater than -1')
+        mu, sigma, xi_left, xi_right = (float(v) for v in (mu, sigma, xi_left, xi_right))
+        if not sigma > 0:
+            raise ValueError('`sigma` must be positive')
+        if xi_left <= -1 or xi_right <= -1:
+            raise ValueError('`xi_left` and `xi_right` must be greater than -1')
         self.mu = mu
-        self.sig = sig
-        self.xi_l = xi_l
-        self.xi_r = xi_r
+        self.sigma = sigma
+        self.xi_left = xi_left
+        self.xi_right = xi_right
 
-        self.left = CarBenLeft(xi_l, mu, sig)
-        self.right = CarBenRight(xi_r, mu, sig)
+        self.left = CarBenLeft(xi_left, mu, sigma)
+        self.right = CarBenRight(xi_right, mu, sigma)
 
-        p = np.array([.5, .5]) if p is None else np.asarray(p, dtype=float)
-        if p.shape != (2,) or np.any(p < 0) or not np.isclose(p.sum(), 1.0, rtol=0, atol=1e-12):
-            raise ValueError('`p` must be two non-negative weights summing to 1')
-        self.p = p
+        w = np.array([.5, .5]) if weights is None else np.asarray(weights, dtype=float)
+        if w.shape != (2,) or np.any(w < 0) or not np.isclose(w.sum(), 1.0, rtol=0, atol=1e-12):
+            raise ValueError('`weights` must be two non-negative weights summing to 1')
+        self.weights = w
 
     # ---- parameters ---------------------------------------------------------
     @property
     def args(self) -> tuple:
         """Tuple of the distribution parameters, in :attr:`PARAM_NAMES` order."""
-        return self.mu, self.sig, self.xi_l, self.xi_r, self.left.a, \
+        return self.mu, self.sigma, self.xi_left, self.xi_right, self.left.a, \
             self.right.a, self.left.b, self.right.b
 
     @property
     def params(self) -> dict:
         """Dictionary of the distribution parameters."""
-        return {name: arg for name, arg in zip(self.PARAM_NAMES, self.args)}
+        return AliasDict(dict(zip(self.PARAM_NAMES, self.args)), self._OLD_PARAM_NAMES)
 
     @property
     def learnable_params(self) -> list[float]:
-        """The four free parameters ``(mu, sig, xi_l, xi_r)``."""
+        """The four free parameters ``(mu, sigma, xi_left, xi_right)``."""
         return [self.params[name] for name in self.PARAM_NAMES[:4]]
 
     @property
     def junctions(self) -> tuple:
-        """``(a_l, a_r)``: the points where the Gaussian body meets each GPD tail."""
+        """``(a_left, a_right)``: the points where the Gaussian body meets each GPD tail."""
         return self.left.a, self.right.a
 
     @property
     def body_mass(self) -> float:
-        """``P(a_l < X < a_r)``, the probability carried by the Gaussian body."""
-        a_l, a_r = self.junctions
-        return float(self.cdf(a_r) - self.cdf(a_l))
+        """``P(a_left < X < a_right)``, the probability carried by the Gaussian body."""
+        a_left, a_right = self.junctions
+        return float(self.cdf(a_right) - self.cdf(a_left))
 
     @property
     def tail_masses(self) -> tuple:
-        """``(P(X < a_l), P(X > a_r))``."""
-        a_l, a_r = self.junctions
-        return float(self.cdf(a_l)), float(self.sf(a_r))
+        """``(P(X < a_left), P(X > a_right))``."""
+        a_left, a_right = self.junctions
+        return float(self.cdf(a_left)), float(self.sf(a_right))
 
     def _components(self):
         return (self.left, self.right)
@@ -688,17 +751,17 @@ class Phat:
     def _weighted(self, values) -> float:
         """``sum(p_i * v_i)`` skipping zero weights, so ``0 * inf`` does not poison the result."""
         with np.errstate(invalid='ignore'):
-            return float(sum(w * v for w, v in zip(self.p, values) if w > 0))
+            return float(sum(w * v for w, v in zip(self.weights, values) if w > 0))
 
     def _mix(self, name: str, x) -> np.ndarray:
         x = _as_float_array(x)
-        out = self.p[0] * getattr(self.left, name)(x) + self.p[1] * getattr(self.right, name)(x)
+        out = self.weights[0] * getattr(self.left, name)(x) + self.weights[1] * getattr(self.right, name)(x)
         return _scalar_or_array(out)
 
     def _logmix(self, name: str, x) -> np.ndarray:
         x = _as_float_array(x)
         with np.errstate(divide='ignore'):
-            logp = np.log(self.p)
+            logp = np.log(self.weights)
         out = np.logaddexp(
             logp[0] + getattr(self.left, name)(x),
             logp[1] + getattr(self.right, name)(x),
@@ -811,7 +874,7 @@ class Phat:
         seed=None,
         ) -> XTYPE:
         """
-        Exact random draws: pick a component with probability ``p``, then invert
+        Exact random draws: pick a component with probability ``weights``, then invert
         that component's CDF. (0.0.x pushed uniforms through the averaged
         ``ppf``, which does not sample the stated density.)
 
@@ -824,7 +887,7 @@ class Phat:
         rng = _rng(random_state if random_state is not None else seed)
         shape = () if size is None else tuple(np.atleast_1d(size).astype(int))
         u = rng.random(shape)
-        from_left = rng.random(shape) < self.p[0]
+        from_left = rng.random(shape) < self.weights[0]
         x = np.where(from_left, self.left.ppf(u), self.right.ppf(u))
         return _scalar_or_array(x)
 
@@ -842,7 +905,7 @@ class Phat:
 
     def var(self) -> float:
         """Variance ``sum p_i (v_i + m_i^2) - mean^2``; ``inf`` when any weighted tail has ``xi >= 1/2``."""
-        comps = [(w, c) for w, c in zip(self.p, self._components()) if w > 0]
+        comps = [(w, c) for w, c in zip(self.weights, self._components()) if w > 0]
         if any(c.xi >= 0.5 for _, c in comps):
             return np.inf
         second = sum(w * (c.var() + c.mean() ** 2) for w, c in comps)
@@ -861,7 +924,7 @@ class Phat:
         Expected shortfall at tail probability ``q``.
 
         ``tail='left'``:  ``E[X | X <= ppf(q)]``, the usual loss-side measure for returns.
-        ``tail='right'``: ``E[X | X >= isf(q)]``; ``inf`` when ``xi_r >= 1``.
+        ``tail='right'``: ``E[X | X >= isf(q)]``; ``inf`` when ``xi_right >= 1``.
         """
         q = _as_float_array(q)
         if tail == 'left':
@@ -873,7 +936,7 @@ class Phat:
         else:
             raise ValueError("`tail` must be 'left' or 'right'")
         with np.errstate(invalid='ignore', divide='ignore'):
-            num = sum(w * np.asarray(v, float) for w, v in zip(self.p, partial) if w > 0)
+            num = sum(w * np.asarray(v, float) for w, v in zip(self.weights, partial) if w > 0)
             out = np.where((q > 0) & (q <= 1), num / q, np.nan)
         return _scalar_or_array(out)
 
@@ -881,11 +944,12 @@ class Phat:
 
     # ---- estimation ---------------------------------------------------------
     @staticmethod
+    @renamed_kwargs(xi_l='xi_left', xi_r='xi_right')
     def fit(
         values: Iterable[float],
-        xi_l: float | None = None,
-        xi_r: float | None = None,
-        p: Sequence[float] | None = None,
+        xi_left: float | None = None,
+        xi_right: float | None = None,
+        weights: Sequence[float] | None = None,
         *,
         backend: str = 'scipy',
         **kwargs: Any,
@@ -893,10 +957,10 @@ class Phat:
         """
         Maximum-likelihood fit.
 
-        With ``xi_l`` and ``xi_r`` given only ``(mu, sig)`` are estimated (the
+        With ``xi_left`` and ``xi_right`` given only ``(mu, sigma)`` are estimated (the
         two-stage estimator: tail shapes from
         :func:`~phat.bootstrap.two_tailed_hill_double_bootstrap`, body by
-        likelihood); otherwise all four parameters are. ``p`` fixes the mixture
+        likelihood); otherwise all four parameters are. ``weights`` fixes the mixture
         weights (default ``(0.5, 0.5)``). Both variants report standard errors.
 
         Parameters
@@ -909,14 +973,14 @@ class Phat:
         """
         if backend == 'scipy':
             from phat.fit import fit_phat
-            return fit_phat(values, xi_l, xi_r, p=p, **kwargs)
+            return fit_phat(values, xi_left, xi_right, weights=weights, **kwargs)
         if backend == 'statsmodels':
-            if p is not None:
-                raise ValueError('the statsmodels backend does not take `p`')
+            if weights is not None:
+                raise ValueError('the statsmodels backend does not take `weights`')
             from phat.fit import _statsmodels_phatfit
             x = np.asarray(values, dtype=float)
             exog = np.ones((x.size, 1))  # constant column; the model has no covariates
-            return _statsmodels_phatfit()(x, exog, xi_l, xi_r).fit(**kwargs)
+            return _statsmodels_phatfit()(x, exog, xi_left, xi_right).fit(**kwargs)
         raise ValueError(f"backend must be 'scipy' or 'statsmodels', not {backend!r}")
 
 class PhatStack(Phat):
@@ -925,36 +989,37 @@ class PhatStack(Phat):
     draws in which every row comes from a single component.
 
     This is NOT a mixture model. Along the first axis the rows are divided
-    between the components in proportion to ``p``; along the second axis each
+    between the components in proportion to ``weights``; along the second axis each
     row is drawn from one component only, so a single regime governs each
     simulated path.
 
     Parameters
     ----------
     phats:  Phat distributions (as separate arguments or one iterable)
-    p:      weights, one per distribution, summing to 1
+    weights: one weight per distribution, summing to 1
 
     Attributes
     ----------
     n_comps:    number of component distributions
     """
 
+    @renamed_kwargs(p='weights')
     def __init__(
         self,
         *phats: Any,
-        p: Sequence[float] | None = None
+        weights: Sequence[float] | None = None
         ) -> None:
         nested = len(phats) == 1 and not isinstance(phats[0], Phat)
         comps: tuple[Phat, ...] = tuple(phats[0]) if nested else phats
 
-        if p is None or len(comps) != len(p):
-            txt = 'Length of probabilities does not match number'
-            txt += f' of distributions: {len(comps)} v {None if p is None else len(p)}'
+        if weights is None or len(comps) != len(weights):
+            txt = 'Length of `weights` does not match number'
+            txt += f' of distributions: {len(comps)} v {None if weights is None else len(weights)}'
             raise AssertionError(txt)
 
         self.n_comps = len(comps)
         self.phats = comps
-        self.p = arrayarize(p)
+        self.weights = arrayarize(weights)
 
     def rvs(self,  # type: ignore[override]  # PhatStack draws 2-d blocks, see the docstring
         size: Sequence[int] | None = None,
@@ -966,7 +1031,7 @@ class PhatStack(Phat):
         """
         Array of random draws, shape ``size = (m, n)`` only.
 
-        Rows are allocated to components as ``floor(m * p)``; remainders go to
+        Rows are allocated to components as ``floor(m * weights)``; remainders go to
         the first components. Each component's rows are drawn with its own
         exact :meth:`Phat.rvs` from one shared random generator.
 
@@ -981,7 +1046,7 @@ class PhatStack(Phat):
             raise AssertionError('Size must be 2D m x n array')
         rng = _rng(random_state if random_state is not None else seed)
 
-        iters = np.floor(size[0] * self.p).astype(int)
+        iters = np.floor(size[0] * self.weights).astype(int)
         rmdr = size[0] - iters.sum()
         iters[:rmdr] += 1
 

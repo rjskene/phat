@@ -26,7 +26,7 @@ from phat.dists import Phat
 
 __all__ = ['PhatFitResult', 'fit_phat', 'PhatFit']  # noqa: F822  # PhatFit via __getattr__
 
-PARAM_NAMES = ('mu', 'sig', 'xi_l', 'xi_r')
+PARAM_NAMES = ('mu', 'sigma', 'xi_left', 'xi_right')
 _XI_MAX = 10.0
 
 
@@ -38,14 +38,14 @@ class PhatFitResult:
     Attributes
     ----------
     params:     estimates of the free parameters, in :attr:`names` order
-    names:      names of the free parameters (``mu``, ``sig`` and, unless fixed, ``xi_l``, ``xi_r``)
+    names:      names of the free parameters (``mu``, ``sigma`` and, unless fixed, ``xi_left``, ``xi_right``)
     bse:        standard errors (square roots of the diagonal of :attr:`cov`); ``nan``
                 where the observed information is not invertible, for instance when a
                 tail shape sits on the ``xi = 0`` boundary
     cov:        inverse observed-information matrix
     llf:        log-likelihood at the optimum
     nobs:       number of observations
-    fixed:      parameters held fixed during the fit (``xi_l``, ``xi_r`` and ``p``)
+    fixed:      parameters held fixed during the fit (``xi_left``, ``xi_right`` and ``weights``)
     converged:  whether the optimiser reported success
     message:    the optimiser's message
     """
@@ -67,9 +67,9 @@ class PhatFitResult:
 
     @property
     def all_params(self) -> dict[str, float]:
-        """``mu, sig, xi_l, xi_r`` with fixed values filled in."""
+        """``mu, sigma, xi_left, xi_right`` with fixed values filled in."""
         out = dict(self.params_dict)
-        for name in ('xi_l', 'xi_r'):
+        for name in ('xi_left', 'xi_right'):
             if name in self.fixed:
                 out[name] = float(self.fixed[name])
         return {name: out[name] for name in PARAM_NAMES}
@@ -77,7 +77,7 @@ class PhatFitResult:
     @property
     def dist(self) -> Phat:
         """The fitted distribution."""
-        return Phat(**self.all_params, p=self.fixed.get('p'))
+        return Phat(**self.all_params, weights=self.fixed.get('weights'))
 
     @property
     def aic(self) -> float:
@@ -110,7 +110,7 @@ class PhatFitResult:
 def _start_values(x: np.ndarray, free_tails: bool) -> np.ndarray:
     """
     Robust starting point: the median for ``mu``; the interquartile range for
-    ``sig`` (for ``xi`` around 0.2 the Phat IQR is about ``2.6 sig``); ``0.2``
+    ``sigma`` (for ``xi`` around 0.2 the Phat IQR is about ``2.6 sigma``); ``0.2``
     for a free tail shape.
     """
     q1, med, q3 = np.percentile(x, [25, 50, 75])
@@ -142,9 +142,9 @@ def _numerical_hessian(f: Callable[[np.ndarray], float], theta: np.ndarray) -> n
 
 def fit_phat(
     values: Iterable[float],
-    xi_l: float | None = None,
-    xi_r: float | None = None,
-    p: Sequence[float] | None = None,
+    xi_left: float | None = None,
+    xi_right: float | None = None,
+    weights: Sequence[float] | None = None,
     start: Sequence[float] | None = None,
     **minimize_kwargs: Any,
 ) -> PhatFitResult:
@@ -154,26 +154,26 @@ def fit_phat(
     Parameters
     ----------
     values:     observations
-    xi_l, xi_r: tail shapes to hold fixed. Give both for the two-stage estimator
-                (shapes from the Hill double bootstrap, then ``mu`` and ``sig`` by
+    xi_left, xi_right: tail shapes to hold fixed. Give both for the two-stage estimator
+                (shapes from the Hill double bootstrap, then ``mu`` and ``sigma`` by
                 likelihood); give neither for the full four-parameter fit.
-    p:          mixture weights to hold fixed (default ``(0.5, 0.5)``)
+    weights:    mixture weights to hold fixed (default ``(0.5, 0.5)``)
     start:      starting values for the free parameters; see :func:`_start_values`
     **minimize_kwargs:  forwarded to ``scipy.optimize.minimize`` (default method
-                ``L-BFGS-B`` with ``sig > 0`` and ``0 <= xi <= 10``)
+                ``L-BFGS-B`` with ``sigma > 0`` and ``0 <= xi <= 10``)
     """
     x = np.asarray(values, dtype=float).ravel()
     if x.size < 3:
         raise ValueError('need at least three observations')
-    if (xi_l is None) != (xi_r is None):
+    if (xi_left is None) != (xi_right is None):
         raise ValueError('fix both tail shapes or neither')
-    free_tails = xi_l is None
+    free_tails = xi_left is None
 
     def unpack(theta: np.ndarray) -> Phat:
         if free_tails:
-            return Phat(theta[0], theta[1], theta[2], theta[3], p=p)
-        assert xi_l is not None and xi_r is not None
-        return Phat(theta[0], theta[1], float(xi_l), float(xi_r), p=p)
+            return Phat(theta[0], theta[1], theta[2], theta[3], weights=weights)
+        assert xi_left is not None and xi_right is not None
+        return Phat(theta[0], theta[1], float(xi_left), float(xi_right), weights=weights)
 
     def nll(theta: np.ndarray) -> float:
         try:
@@ -200,9 +200,9 @@ def fit_phat(
 
     fixed: dict[str, Any] = {}
     if not free_tails:
-        fixed['xi_l'], fixed['xi_r'] = float(xi_l), float(xi_r)  # type: ignore[arg-type]
-    if p is not None:
-        fixed['p'] = tuple(float(v) for v in p)
+        fixed['xi_left'], fixed['xi_right'] = float(xi_left), float(xi_right)  # type: ignore[arg-type]
+    if weights is not None:
+        fixed['weights'] = tuple(float(v) for v in weights)
     names = PARAM_NAMES if free_tails else PARAM_NAMES[:2]
     return PhatFitResult(
         params=theta, names=names, bse=bse, cov=cov, llf=-float(res.fun), nobs=int(x.size),
@@ -277,7 +277,7 @@ def _statsmodels_phatfit() -> type:
             if start_params is None:
                 start_params = _start_values(np.asarray(self.endog, dtype=float), free_tails)
 
-            names = ['mu', 'sig'] + (['xi_l', 'xi_r'] if free_tails else [])
+            names = ['mu', 'sigma'] + (['xi_left', 'xi_right'] if free_tails else [])
             self.data.xnames = names
             self.k_extra = len(names) - self.exog.shape[1]
             self.df_model = float(len(names) - self.k_constant - self.k_extra)

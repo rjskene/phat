@@ -79,7 +79,7 @@ class TestArrayConstructor:
             y=np.array([0.5, -0.3]),
             vols=np.array([1.1, 1.2]),
             resids=np.array([0.4, -0.6]),
-            iters=4, periods=5, use_backcast=False,
+            n_paths=4, horizon=5, use_backcast=False,
         )
 
     def test_order_and_history(self, cast):
@@ -184,7 +184,7 @@ class TestArchIntegration:
         return arch_model(rets, mean='Constant', vol='GARCH', p=1, q=1).fit(disp='off')
 
     def test_constant_mean_garch11(self, garch_res):
-        cast = Garchcaster(garch=garch_res, iters=50, periods=20)
+        cast = Garchcaster(garch=garch_res, n_paths=50, horizon=20)
         assert cast.order == (0, 0, 1, 1)
         assert cast.maxlag == 1
         assert np.isclose(cast.mean.constant, garch_res.params['mu'])
@@ -197,7 +197,7 @@ class TestArchIntegration:
 
     def test_forecast_smoke(self, garch_res):
         dist = ph.Phat(0, 1, 0.3, 0.3)
-        cast = Garchcaster(garch=garch_res, iters=200, periods=30, dist=dist)
+        cast = Garchcaster(garch=garch_res, n_paths=200, horizon=30, dist=dist)
         res = cast.forecast(seed=0)
         assert res.values.shape == (200, 30)
         assert np.isfinite(res.values).all()
@@ -207,7 +207,7 @@ class TestArchIntegration:
     def test_order_warning(self, garch_res):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter('always')
-            Garchcaster(garch=garch_res, iters=5, periods=5, order=(2, 0, 1, 1))
+            Garchcaster(garch=garch_res, n_paths=5, horizon=5, order=(2, 0, 1, 1))
         assert len(w) == 1 and issubclass(w[-1].category, UserWarning)
         assert 'OVERRIDDEN' in str(w[-1].message)
 

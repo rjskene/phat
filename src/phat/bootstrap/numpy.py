@@ -24,6 +24,8 @@ from typing import Union
 
 import numpy as np
 
+from phat._compat import renamed_kwargs
+
 try:
     import numba as nb
     _njit = nb.njit
@@ -250,9 +252,10 @@ def seed_bootstrap(seed:int) -> None:
     _seed_jit(seed)
 
 
+@renamed_kwargs(iters='n_runs')
 def two_tailed_hill_double_bootstrap(
     values:Iterable[float],
-    iters:int=10,
+    n_runs:int=10,
     return_mean:bool=True,
     pbar_kwargs:dict=None,
     seed:int=None,
@@ -264,14 +267,14 @@ def two_tailed_hill_double_bootstrap(
     Parameters
     ----------
     values:         1-d sample
-    iters:          number of independent double-bootstrap runs to average
+    n_runs:          number of independent double-bootstrap runs to average
     return_mean:    return the mean over runs (``True``) or every run
     pbar_kwargs:    keyword arguments for the tqdm progress bar
     seed:           seed for the bootstrap resampling (see :func:`seed_bootstrap`)
 
     Returns
     -------
-    ``(xi_left, xi_right)`` as floats, or as arrays of length ``iters``
+    ``(xi_left, xi_right)`` as floats, or as arrays of length ``n_runs``
     """
     values = np.asarray(values, dtype=float)
     pbar_kwargs = {} if pbar_kwargs is None else pbar_kwargs
@@ -284,10 +287,10 @@ def two_tailed_hill_double_bootstrap(
     right = values[values > values.mean()]
     right = np.sort(right)[::-1]
 
-    shl = np.zeros(iters)
-    shr = np.zeros(iters)
+    shl = np.zeros(n_runs)
+    shr = np.zeros(n_runs)
     with np.errstate(all='ignore'):
-        for i in trange(iters, **pbar_kwargs):
+        for i in trange(n_runs, **pbar_kwargs):
             shl[i] = dbl_bs(left, t=.5, r=500, style='hill', A_type='dani')
             shr[i] = dbl_bs(right, t=.5, r=500, style='hill', A_type='dani')
 
