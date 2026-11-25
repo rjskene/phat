@@ -7,6 +7,9 @@ change.
 
 ## [Unreleased]
 
+The next release will be **1.0.0** (the package metadata already says so).
+It is not on PyPI yet.
+
 ### Fixed
 - `Garchcaster` kept `resids[:-maxlag:]` (everything but the last `maxlag`
   values) as its residual history when `use_backcast=False`; it now keeps the
@@ -142,6 +145,7 @@ change.
   | `rtail=True` / `False` | `tail='right'` / `'left'` | `CarBenHybrid` |
   | `iters`, `periods` | `n_paths`, `horizon` | `Garchcaster`, `Garchcaster.forecast`, `GarchcastResults` |
   | `iters` | `n_runs` | `two_tailed_hill_double_bootstrap` |
+  | `rets` | `gross_returns` | `GarchcastResults` (it is `1 + values/100`, the price relative, not a return) |
 
   - The old keywords and the old attributes (`dist.sig`, `dist.xi_l`,
     `dist.xi_r`, `dist.p`, `cast.iters`, `cast.periods`, ...) keep working

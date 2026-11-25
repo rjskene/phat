@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phat-tails"
-version = "0.0.11"
+version = "1.0.0"
 description = "Pareto Hybrids with Asymmetric Tails: a two-tailed heavy-tailed distribution for Python"
 readme = "README.md"
 license = { file = "LICENSE" }

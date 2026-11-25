@@ -112,8 +112,8 @@ class TestArrayConstructor:
         assert np.array_equal(a.values, b.values)
         assert not np.array_equal(a.values, c.values)
         assert (a.vars > 0).all()
-        # values are percentage returns; rets is the gross return
-        assert np.allclose(a.rets, 1 + a.values / 100)
+        # values are percentage returns; gross_returns is the price relative
+        assert np.allclose(a.gross_returns, 1 + a.values / 100)
 
     def test_phat_innovations(self, cast):
         dist = ph.Phat(0, 1, 0.2, 0.25)

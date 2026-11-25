@@ -333,8 +333,11 @@ class GarchcastResults:
         self.n_paths, self.horizon = values.shape
 
     @property
-    def rets(self) -> np.ndarray:
+    def gross_returns(self) -> np.ndarray:
+        """Price relatives ``1 + values/100``; ``values`` are returns in percent."""
         return 1 + self.values/100
+
+    rets = renamed_attribute('gross_returns')
 
     @property
     def vars(self) -> np.ndarray:

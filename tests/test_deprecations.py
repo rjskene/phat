@@ -169,6 +169,13 @@ class TestGarchcaster:
             assert new.periods == 6
 
 
+def test_results_rets_is_now_gross_returns():
+    res = Garchcaster(**TestGarchcaster.KW, n_paths=4, horizon=5).forecast(seed=1)
+    with pytest.warns(DeprecationWarning, match='gross_returns'):
+        old = res.rets
+    assert np.array_equal(old, res.gross_returns)
+
+
 def test_bootstrap_iters_keyword():
     from phat.bootstrap import two_tailed_hill_double_bootstrap
     x = np.loadtxt(FIXTURE)
