@@ -89,6 +89,46 @@ change.
   `(iters, periods)`.
 - `GarchcastResults.plot(kind='price', random_state=...)` picks the displayed
   paths reproducibly.
+- Asking for a name whose optional dependency is missing (`phat.PhatNet`
+  without TensorFlow or pandas) raises an `ImportError` that names the extra
+  to install, `pip install "phat-tails[learn]"`.
+
+### Documentation
+- The documentation builds from the installed package with current Sphinx and
+  the released `nbsphinx` (the vendored copy of `nbsphinx` 0.7.1 in
+  `docs/ext` is removed). Notebooks are executed ahead of the build and
+  committed with their outputs; the build does not run them. The API page
+  lists the distribution classes, the fit functions and the forecaster.
+- Claims removed or corrected, in the README and the notebooks:
+  - Phat is no longer described as one of "only two candidates" for
+    two-tailed data. The asymmetric Student-t families, the two-tailed
+    generalized Pareto mixtures of the R package `evmix` and the three-piece
+    model of Debbabi, Kratz and Mboup are cited as prior art.
+  - Phat is no longer said to "improve upon" kernel-body methods.
+  - The "Gaussian body" is now described with its size: 18% to 28% of the
+    probability lies between the two junctions for tail shapes in [0, 1].
+  - The two-sided mixture is attributed to Julie Carreau's 2007 PhD thesis
+    (Université de Montréal, §3.2 and §4.5), which proposes mixing hybrid
+    Pareto components with their reflections and applies it to S&P 500
+    returns. The earlier text said it had been suggested "though not
+    implemented".
+  - `sigma` is stated to be a scale parameter and not the standard deviation
+    (about 4.6 `sigma` at a shape of 0.2 in both tails), and Phat with both
+    shapes at 0 is stated not to be Gaussian.
+- `moments.ipynb`: the quantile section described the Phat quantile as the
+  weighted average of the component quantiles, and the moments section used
+  the truncated-normal moments without the weight of the Gaussian piece.
+  Both are rewritten to match the corrected code (quantile as the root of
+  the mixture CDF; component moments from the Gaussian piece and the
+  generalized Pareto tail; mixture variance including the spread of the
+  component means) and checked there against numerical integration.
+- `intro.ipynb` and `README.md` rewritten on the new argument names, with
+  seeded draws and outputs from the corrected code. The README lists the
+  optional extras in place of the 2021 pinned dependency list, and has a
+  short section on upgrading from 0.0.x.
+- Not yet re-run: the notebooks that load market data (`dblbs`, `demo`,
+  `fattails`, `garch`, `mle_fit`, `phatgarch`, `thephat`) and `nn_fit`. Their
+  text is corrected, but their outputs are still those of 0.0.x.
 
 ### Changed
 - **Argument and attribute names (old names deprecated, still working).**
@@ -205,3 +245,8 @@ change.
 - `phat/thold.py`, which installed the R package `POT` at import time and was
   listed in `.gitignore` while still tracked. It was never exported by the
   package.
+- `docs/notebooks/pot.ipynb` and `docs/notebooks/phatstack.ipynb`. Both
+  imported modules that are not part of this package (an R bridge and a
+  private options library) and could not be run. `pot_ref.ipynb`, the
+  peaks-over-threshold reference page, stays.
+- `docs/ext/custom_nbsphinx.py` (see Documentation).

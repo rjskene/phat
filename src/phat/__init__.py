@@ -28,6 +28,9 @@ _LAZY = {
     "Garchcaster": "phat.tseries",
 }
 
+# extra that provides the optional dependencies of each lazily imported module
+_EXTRAS = {"phat.learn": "learn", "phat.tseries": "garch"}
+
 __all__ = [
     "CarBenHybrid", "CarBenLeft", "CarBenRight", "Phat", "PhatStack",
     *_LAZY,
@@ -38,7 +41,16 @@ def __getattr__(name: str):
     module = _LAZY.get(name)
     if module is None:
         raise AttributeError(f"module 'phat' has no attribute {name!r}")
-    return getattr(import_module(module), name)
+    try:
+        return getattr(import_module(module), name)
+    except ModuleNotFoundError as exc:
+        extra = _EXTRAS.get(module)
+        if extra is None or (exc.name or '').split('.')[0] == 'phat':
+            raise
+        raise ImportError(
+            f"phat.{name} needs {exc.name!r}, which is not installed: "
+            f'pip install "phat-tails[{extra}]"'
+        ) from exc
 
 
 def __dir__():

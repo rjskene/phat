@@ -364,19 +364,25 @@ class GarchcastResults:
         **kwargs: Any
         ) -> Any:
         """
-        Main method used to generate plots. Needs matplotlib (the ``plot`` extra).
+        Plot the forecast. Needs matplotlib (the ``plot`` extra).
 
-        Params
-        -------
-        kind:    str; kind of plot. Accepts 'vol', 'var', 'price', or 'end_price'
-        ax:      matplotlib Axes object(s); if one is not provided, it will be created.
-        p:       float; starting price for 'price' and 'end_price'
-        n:       int; number of simulated paths to draw for 'price'
-        *args, **kwargs:    forwarded to the matplotlib call ('price' and 'end_price' take keywords only)
+        Parameters
+        ----------
+        kind : str
+            ``'vol'``, ``'var'``, ``'price'`` or ``'end_price'``
+        ax : matplotlib Axes, optional
+            created when not given
+        p : float
+            starting price for ``'price'`` and ``'end_price'``
+        n : int
+            number of simulated paths to draw for ``'price'``
+        ``*args``, ``**kwargs``
+            forwarded to the matplotlib call (``'price'`` and ``'end_price'``
+            take keywords only)
 
-        Return
+        Returns
         -------
-        ax:      matplotlib Axes object(s); for 'end_price' a tuple ``(ax, prices, bins)``
+        matplotlib Axes; for ``'end_price'`` a tuple ``(ax, prices, bins)``
         """
         import matplotlib.pyplot as plt
         multi_ax = ['price']
@@ -701,20 +707,28 @@ Params:
         random_state:Any=None,
         ) -> GarchcastResults:
         """
-        User-facing interface with forecast generator
+        Simulate ``n_paths`` paths of ``horizon`` periods from the ARMA-GARCH process.
 
-        Params:
-            n_paths: int
-                number of simulated paths
-            horizon: int
-                number of periods forecast along each path
-            dist: Phat or scipy rv_frozen class
-                distribution used to generate residuals
-            innovs: np.ndarray
-                n_paths x horizon of garch residuals
-            random_state: None, int seed, numpy.random.Generator or RandomState
-                for the innovations if `innovs` is not provided
-            seed: alias of `random_state`
+        Parameters
+        ----------
+        n_paths : int, optional
+            number of simulated paths (default: the value given to the constructor)
+        horizon : int, optional
+            number of periods forecast along each path (default: as constructed)
+        dist : Phat or frozen scipy.stats distribution, optional
+            innovation distribution; standard Gaussian when ``None``. A
+            :class:`~phat.dists.Phat` is sampled with its exact unit-variance
+            sampler :meth:`~phat.dists.Phat.std_rvs`.
+        innovs : array of shape ``(n_paths, horizon)``, optional
+            innovations to use instead of drawing them
+        random_state : None, int, numpy.random.Generator or RandomState
+            for the innovations when ``innovs`` is not given
+        seed
+            alias of ``random_state``
+
+        Returns
+        -------
+        GarchcastResults
         """
         n_iters, n_periods = int(n_paths), int(horizon)  # type: ignore[arg-type]  # filled by argsetter
         if innovs is None:

@@ -51,9 +51,11 @@ docs = [
     "sphinx>=7",
     "sphinx-book-theme>=1.1",
     "nbsphinx>=0.9",
+    "nbconvert>=7",
     "ipython>=8",
     "ipykernel>=6",
     "matplotlib>=3.8",
+    "seaborn>=0.13",
     "pandas>=2.0",
     "phat-tails[fit,speed,garch]",
 ]

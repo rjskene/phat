@@ -39,6 +39,16 @@ def test_garchcaster_and_bootstrap_do_not_import_tensorflow_arch_or_pandas():
     assert _loaded_in_fresh_interpreter(code) == '[]'
 
 
+def test_missing_optional_dependency_names_the_extra(monkeypatch):
+    import sys
+    for mod in [m for m in sys.modules if m.startswith('phat.learn')]:
+        monkeypatch.delitem(sys.modules, mod)
+    monkeypatch.setitem(sys.modules, 'tensorflow', None)
+    with pytest.raises(ImportError, match=r'phat-tails\[learn\]'):
+        ph.PhatNet  # noqa: B018
+    assert not hasattr(ph, 'no_such_name')
+
+
 class TestOrderInference:
     def test_infer_order(self):
         om = PROCESSMIXIN()
