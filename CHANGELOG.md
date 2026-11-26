@@ -186,9 +186,46 @@ It is not on PyPI yet.
   seeded draws and outputs from the corrected code. The README lists the
   optional extras in place of the 2021 pinned dependency list, and has a
   short section on upgrading from 0.0.x.
-- Not yet re-run: the notebooks that load market data (`dblbs`, `demo`,
-  `fattails`, `garch`, `mle_fit`, `phatgarch`, `thephat`) and `nn_fit`. Their
-  text is corrected, but their outputs are still those of 0.0.x.
+- The notebooks no longer download prices. `docs/data/` holds the daily
+  returns of the S&P 500 (`^GSPC`, 1950-01-04 to 2026-11-24) and of KO, with
+  a README giving the source, the date of the download and the method.
+- Every notebook except `nn_fit` is re-run on the corrected code with fixed
+  seeds: `intro`, `moments`, `thephat`, `mle_fit`, `fattails`, `demo`,
+  `dblbs`, `garch` and `phatgarch`. Their text is rewritten from the new
+  outputs. What changed in substance:
+  - `mle_fit`: the four-parameter maximum-likelihood fit to S&P 500 returns
+    puts both tail shapes on the lower bound of zero; the Hill double
+    bootstrap gives 0.32 and 0.33. The page reports both and the implied
+    standard deviations.
+  - `demo` and `phatgarch` fit with `Phat.fit` (Hill tail shapes, then
+    location and scale by maximum likelihood) instead of `PhatNet`, and each
+    has a table comparing the two-stage Phat, the full-MLE Phat, a Student's
+    T and a Gaussian on the GARCH residuals. Student's T has the highest
+    log-likelihood on both data sets and the two-stage Phat the lowest; the
+    two-stage Phat implies a standard deviation of 1.7 to 2.1 where the
+    residuals have 1.0. The earlier statements that the Phat fits these
+    residuals better than the Gaussian, that an Anderson-Darling test "cannot
+    reject" it (the test rejects both; the statistic was misread), and that
+    its forecasts are more "natural" or "realistic" are removed.
+  - `phatgarch`: forecasts are from the corrected `Garchcaster` (see Fixed).
+    The page now shows the Gaussian forecast beside the Phat one, the
+    one-year returns of the index since 1950 for scale, and the share of
+    simulated paths with a daily return below -100%, which the model allows
+    and a price does not. The scaling passages and the PhatNet section are
+    gone, and the skewed-T section uses the skewed-T fit (it used the T fit).
+  - `garch`: the manual `Garchcaster` example passed the mean of the GARCH
+    fit as a variance parameter and the ARMA residuals as the series; both
+    are corrected. The feed-forward example took the square root of the
+    volatility twice. The timing comparison with `arch` is re-measured (the
+    two are now about equally fast).
+  - `fattails`: the 90-year window is replaced by windows the 1950-2026
+    sample can supply.
+  - `dblbs`: the two tables of simulation results were produced with the
+    0.0.x sampler. `docs/notebooks/dbs_tests.py` regenerates them with seeds.
+- `pmdarima` is listed in the `docs` extra, for the ARMA fits in `garch` and
+  `phatgarch`. It is not a dependency of the package.
+- Not re-run: `nn_fit`, which needs TensorFlow (`PhatNet`). Its outputs are
+  still those of 0.0.x.
 
 ### Changed
 - **Argument and attribute names (old names deprecated, still working).**
