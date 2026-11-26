@@ -10,6 +10,33 @@ change.
 The next release will be **1.0.0** (the package metadata already says so).
 It is not on PyPI yet.
 
+### Removed
+- **`phat.learn`, the TensorFlow module, and with it the `learn` extra.**
+  `PhatNet`, `PhatNetBeta`, `PhatLoss`, `PhatMetric`, `DataSplit`, the
+  Gaussian network `phat.learn.normnet.DN` and the TensorFlow Probability
+  copy of the distribution (`Phat4TF`) are gone. Asking for `phat.PhatNet`,
+  `phat.PhatLoss`, `phat.PhatMetric`, `phat.DataSplit` or `phat.learn` raises
+  an `AttributeError` that points at `Phat.fit`. Reasons:
+  - the network was fed zeros, so its output was four constants and training
+    was gradient descent on `mu`, `sigma` and the two tail shapes.
+    `Phat.fit(values, xi_left=..., xi_right=...)` fits the same model by
+    maximum likelihood, with standard errors, and needs SciPy only;
+  - the code did not run on current TensorFlow (it relied on Keras 2
+    internals that Keras 3 removed);
+  - `PhatLoss` was `NLL / (1 + tail error)`. When the negative log-likelihood
+    is positive (data on a scale of about 1 or more) a larger tail error
+    lowers that loss;
+  - the likelihood was computed for every observation against every row of
+    parameters in the batch, which is correct only while all rows are equal;
+  - the TensorFlow density had `1e-10` added to it and returned `z` instead
+    of `exp(-z) / b` for an exponential tail (`xi = 0`).
+- `phat.bootstrap.tf`, a TensorFlow version of the Hill double bootstrap that
+  nothing used. It discarded the result of every update to its error arrays,
+  so the bootstrap error was `nan` throughout and the threshold was always
+  `k = 2`. `phat.bootstrap.numpy` is the working implementation.
+- The `nn_fit` notebook ("Neural Networks") and its result files, which
+  documented `PhatNet`.
+
 ### Fixed
 - `Garchcaster` forecasts were wrong except for a constant-mean GARCH(1,1) built
   with `use_backcast=False`. On identical innovations a forecast built from a
@@ -145,13 +172,10 @@ It is not on PyPI yet.
   fixed shapes print to six decimals.
 - The Hill double bootstrap no longer emits tqdm's "IProgress not found"
   warning in Jupyter when `ipywidgets` is missing.
-- `phat.bootstrap`, `phat.fit`, `phat.learn`, `phat.tseries` and `phat.utils`
+- `phat.bootstrap`, `phat.fit`, `phat.tseries` and `phat.utils`
   are reachable as attributes again (`ph.bootstrap.numpy.dbl_bs`), as they
   were when 0.0.x imported everything eagerly. They are still imported only
   on first use.
-- Asking for a name whose optional dependency is missing (`phat.PhatNet`
-  without TensorFlow or pandas) raises an `ImportError` that names the extra
-  to install, `pip install "phat-tails[learn]"`.
 
 ### Documentation
 - The documentation builds from the installed package with current Sphinx and
@@ -189,7 +213,7 @@ It is not on PyPI yet.
 - The notebooks no longer download prices. `docs/data/` holds the daily
   returns of the S&P 500 (`^GSPC`, 1950-01-04 to 2026-11-24) and of KO, with
   a README giving the source, the date of the download and the method.
-- Every notebook except `nn_fit` is re-run on the corrected code with fixed
+- Every notebook is re-run on the corrected code with fixed
   seeds: `intro`, `moments`, `thephat`, `mle_fit`, `fattails`, `demo`,
   `dblbs`, `garch` and `phatgarch`. Their text is rewritten from the new
   outputs. What changed in substance:
@@ -228,8 +252,6 @@ It is not on PyPI yet.
     observations) and under-estimates a shape of 5 by about 0.4.
 - `pmdarima` is listed in the `docs` extra, for the ARMA fits in `garch` and
   `phatgarch`. It is not a dependency of the package.
-- Not re-run: `nn_fit`, which needs TensorFlow (`PhatNet`). Its outputs are
-  still those of 0.0.x.
 
 ### Changed
 - **Argument and attribute names (old names deprecated, still working).**
@@ -255,8 +277,6 @@ It is not on PyPI yet.
   - Fit results name their parameters `mu, sigma, xi_left, xi_right`
     (`PhatFitResult.names`, `params_dict`, `fixed`, and the `statsmodels`
     backend's `exog_names`).
-  - `phat.learn` (the TensorFlow module) is unchanged; it has its own names
-    and its future is an open decision.
 - **Sign convention of `xi` (breaking, with a one-release shim).** `xi` is
   now always the shape of the generalized Pareto tail: positive for a heavy
   tail, zero for an exponential tail, `-1 < xi < 0` for a bounded tail. The
@@ -284,7 +304,7 @@ It is not on PyPI yet.
   dependencies are `numpy>=1.25` and `scipy>=1.11` only; `requires-python`
   is `>=3.11` (the oldest CPython still supported upstream). Everything else
   is an extra: `fit` (statsmodels), `speed` (numba, tqdm), `garch` (arch,
-  pandas), `plot` (matplotlib), `learn` (TensorFlow stack), `docs`, `dev`,
+  pandas), `plot` (matplotlib), `docs`, `dev`,
   `all`. `pmdarima` is no longer a dependency; a fitted `pmdarima.ARIMA` is
   still accepted by `Garchcaster` through duck typing.
 - Project URL corrected to `https://github.com/rjskene/phat` and the licence
@@ -295,8 +315,7 @@ It is not on PyPI yet.
   is imported), the progress bar becomes a plain `range`, and matplotlib is
   imported inside the plotting methods.
 - Source is formatted to pass `ruff` (E, F, W, I, B, UP) and `mypy` (lenient:
-  implicit Optional allowed; `phat.learn` and `phat.bootstrap.tf` are excluded
-  pending the owner's decision on PhatNet). `phat.tseries` is fully typed:
+  implicit Optional allowed). `phat.tseries` is fully typed:
   `MEAN`/`VOL` store parameters as float arrays and orders as `(int, int)`
   tuples, `Garchcaster` raises `ValueError` (instead of `UnboundLocalError`)
   when neither parameters nor a fitted model are given.
@@ -335,8 +354,8 @@ It is not on PyPI yet.
 - `PhatFit.nloglikeobs` returns `inf` for infeasible parameters instead of
   raising.
 - `import phat` no longer imports TensorFlow, `arch`, `pmdarima` or Numba.
-  `phat.bootstrap`, `phat.learn` and `phat.tseries` load on first use of
-  `two_tailed_hill_double_bootstrap`, `PhatNet`, `Garchcaster`, etc.
+  `phat.bootstrap` and `phat.tseries` load on first use of
+  `two_tailed_hill_double_bootstrap`, `Garchcaster`, etc.
 - `phat.utils` no longer imports pandas or matplotlib at module level.
   `arrayarize` accepts any object with a `to_numpy` method.
 

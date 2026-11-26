@@ -38,15 +38,6 @@ speed = ["numba>=0.59", "tqdm>=4.66"]
 garch = ["arch>=6.0", "pandas>=2.0"]
 # Plot helpers in utils.PriceSim and GarchcastResults.plot
 plot = ["matplotlib>=3.8"]
-# phat.learn (PhatNet / PhatLoss on TensorFlow; kept pending the owner's decision)
-learn = [
-    "tensorflow>=2.16",
-    "tensorflow-probability>=0.24",
-    "tf-keras>=2.16",
-    "scikit-learn>=1.3",
-    "matplotlib>=3.8",
-    "pandas>=2.0",
-]
 docs = [
     "sphinx>=7",
     "sphinx-book-theme>=1.1",
@@ -67,7 +58,7 @@ dev = [
     "mypy>=1.10",
     "phat-tails[fit,speed,garch,plot]",
 ]
-all = ["phat-tails[fit,speed,garch,plot,learn]"]
+all = ["phat-tails[fit,speed,garch,plot]"]
 
 [project.urls]
 Homepage = "https://github.com/rjskene/phat"
@@ -98,13 +89,8 @@ ignore = [
     "UP007", # keep Union[...] in long signatures for now
 ]
 
-[tool.ruff.lint.per-file-ignores]
-"src/phat/learn/*" = ["E", "F", "W", "I", "B", "UP"]      # unreviewed TensorFlow code, decision pending
-"src/phat/bootstrap/tf.py" = ["E", "F", "W", "I", "B", "UP"]
-
 [tool.mypy]
 python_version = "3.11"
 files = ["src/phat"]
 ignore_missing_imports = true
 implicit_optional = true          # legacy `arg: float = None` signatures in the illustration classes
-exclude = ["src/phat/learn", "src/phat/bootstrap/tf.py"]

@@ -39,7 +39,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip
       - run: pip install ".[dev]"
-      - run: python -c "import sys, phat; assert 'tensorflow' not in sys.modules; print(phat.__version__)"
+      - run: python -c "import sys, phat; assert 'arch' not in sys.modules and 'numba' not in sys.modules; print(phat.__version__)"
       - run: pytest -p no:cacheprovider
 
   core-only:

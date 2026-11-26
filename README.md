@@ -33,12 +33,11 @@ The distribution needs Python 3.11 or later, NumPy and SciPy, and nothing else. 
 | `phat-tails[garch]` | `arch`, pandas | building a `Garchcaster` from a fitted `arch` model |
 | `phat-tails[fit]` | statsmodels | the alternative `backend='statsmodels'` of `Phat.fit` |
 | `phat-tails[plot]` | matplotlib | the plotting helpers |
-| `phat-tails[learn]` | TensorFlow, TensorFlow Probability | `PhatNet` (experimental) |
 | `phat-tails[all]` | all of the above | |
 
 ## Upgrading from 0.0.x ##
 
-Version 0.0.11 and earlier returned wrong quantiles, random draws, means and variances for `Phat` (the density and CDF were right). These are fixed, so numbers change: see [CHANGELOG.md](CHANGELOG.md) for every change in behaviour. Several arguments were also renamed (`sig` to `sigma`, `xi_l`/`xi_r` to `xi_left`/`xi_right`, `p` to `weights`, and others); the old names still work for one release and warn.
+Version 0.0.11 and earlier returned wrong quantiles, random draws, means and variances for `Phat` (the density and CDF were right). These are fixed, so numbers change: see [CHANGELOG.md](CHANGELOG.md) for every change in behaviour. Several arguments were also renamed (`sig` to `sigma`, `xi_l`/`xi_r` to `xi_left`/`xi_right`, `p` to `weights`, and others); the old names still work for one release and warn. `PhatNet`, `PhatLoss` and the rest of the TensorFlow module `phat.learn` are removed; `Phat.fit` with the tail shapes held fixed does the same job without TensorFlow.
 
 ## Quickstart ##
 
@@ -123,10 +122,7 @@ xi_left, xi_right = ph.two_tailed_hill_double_bootstrap(x)
 
 and hold them fixed while the location and scale are fitted.
 
-The package also provides:
-
-+ `ph.Garchcaster`: simulates forecasts from ARMA and GARCH models with Phat innovations.
-+ `ph.PhatNet`: an experimental neural-network fit with a custom loss, `PhatLoss`. It needs the `learn` extra.
+The package also provides `ph.Garchcaster`, which simulates forecasts from ARMA and GARCH models with Phat innovations.
 
 ## Also Check Out ##
 

@@ -14,7 +14,7 @@ HAS_ARCH = importlib.util.find_spec('arch') is not None and importlib.util.find_
 RETURNS = pathlib.Path(__file__).parent / 'yelp_returns.csv'
 
 
-HEAVY = "{'tensorflow','arch','pmdarima','numba','matplotlib','pandas','statsmodels','tqdm','sklearn'}"
+HEAVY = "{'arch','pmdarima','numba','matplotlib','pandas','statsmodels','tqdm'}"
 
 
 def _loaded_in_fresh_interpreter(code: str) -> str:
@@ -31,9 +31,9 @@ def test_import_phat_imports_numpy_and_scipy_only():
     assert _loaded_in_fresh_interpreter(code) == '[]'
 
 
-def test_garchcaster_and_bootstrap_do_not_import_tensorflow_arch_or_pandas():
-    # numba and tqdm are accelerators that load when installed; arch, pandas and the
-    # TensorFlow stack never load until a fitted arch model or phat.learn is used.
+def test_garchcaster_and_bootstrap_do_not_import_arch_or_pandas():
+    # numba and tqdm are accelerators that load when installed; arch and pandas never
+    # load until a fitted arch model is used.
     code = ("import sys, phat; from phat import Garchcaster, two_tailed_hill_double_bootstrap; "
             f"print(sorted({{m.split('.')[0] for m in sys.modules}} & {HEAVY} - {{'numba', 'tqdm'}}))")
     assert _loaded_in_fresh_interpreter(code) == '[]'
@@ -47,14 +47,28 @@ def test_submodules_are_reachable_as_attributes():
     assert _loaded_in_fresh_interpreter(code) == 'dbl_bs Garchcaster fit_phat'
 
 
-def test_missing_optional_dependency_names_the_extra(monkeypatch):
-    import sys
-    for mod in [m for m in sys.modules if m.startswith('phat.learn')]:
-        monkeypatch.delitem(sys.modules, mod)
-    monkeypatch.setitem(sys.modules, 'tensorflow', None)
-    with pytest.raises(ImportError, match=r'phat-tails\[learn\]'):
-        ph.PhatNet  # noqa: B018
+@pytest.mark.parametrize('name', ['PhatNet', 'PhatLoss', 'PhatMetric', 'DataSplit'])
+def test_names_removed_with_the_tensorflow_module_point_at_phat_fit(name):
+    with pytest.raises(AttributeError, match=r'removed in 1\.0.*Phat\.fit'):
+        getattr(ph, name)
+    assert not hasattr(ph, name)
+    assert name not in ph.__all__
     assert not hasattr(ph, 'no_such_name')
+
+
+@pytest.mark.parametrize('module', ['phat.learn', 'phat.bootstrap.tf'])
+def test_tensorflow_modules_are_gone(module):
+    import importlib
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(module)
+    with pytest.raises(AttributeError):
+        ph.learn  # noqa: B018
+
+
+def test_no_extra_installs_tensorflow():
+    from importlib.metadata import metadata, requires
+    assert 'learn' not in metadata('phat-tails').get_all('Provides-Extra')
+    assert not [r for r in requires('phat-tails') if 'tensorflow' in r.lower() or 'keras' in r.lower()]
 
 
 class TestOrderInference:

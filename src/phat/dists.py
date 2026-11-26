@@ -1,8 +1,6 @@
 """
 Houses all scipy-based distributions.
 
-Separate code required for Tensorflow. Found in .learn.dists
-
 WARNING: Only CarBen and Phat distributions should be used. The remaining
 distributions are for illustration purposes in the docs.
 """
