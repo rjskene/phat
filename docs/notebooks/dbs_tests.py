@@ -3,8 +3,8 @@ Simulation study behind the "Testing" section of ``dblbs.ipynb``.
 
 Regenerates the two result files read by the notebook:
 
-    python dbs_tests.py 1    # dbs_test_on_r_and_t.csv                 (about 30 minutes)
-    python dbs_tests.py 2    # dbs_test_on_sample_size_and_tails.csv   (about an hour)
+    python dbs_tests.py 1    # dbs_test_on_r_and_t.csv                 (about 20 minutes)
+    python dbs_tests.py 2    # dbs_test_on_sample_size_and_tails.csv   (about 90 minutes)
 
 Every random draw is seeded, so the files are reproducible on a given platform
 with Numba installed (the pure-Python fallback uses a different random stream).

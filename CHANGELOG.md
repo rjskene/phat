@@ -221,7 +221,11 @@ It is not on PyPI yet.
   - `fattails`: the 90-year window is replaced by windows the 1950-2026
     sample can supply.
   - `dblbs`: the two tables of simulation results were produced with the
-    0.0.x sampler. `docs/notebooks/dbs_tests.py` regenerates them with seeds.
+    0.0.x sampler. `docs/notebooks/dbs_tests.py` regenerates them with seeds,
+    and both are regenerated. The conclusion changes from "fairly consistent"
+    to a stated bias: the Hill double bootstrap over-estimates small tail
+    shapes (by about 0.1 at a true shape of 0.1 or 0.2, even with 200,000
+    observations) and under-estimates a shape of 5 by about 0.4.
 - `pmdarima` is listed in the `docs` extra, for the ARMA fits in `garch` and
   `phatgarch`. It is not a dependency of the package.
 - Not re-run: `nn_fit`, which needs TensorFlow (`PhatNet`). Its outputs are
