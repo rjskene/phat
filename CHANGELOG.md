@@ -5,10 +5,12 @@ All notable changes to `phat-tails` are recorded here. The format follows
 behaviour is listed, because numbers printed in the old README and notebooks
 change.
 
-## [Unreleased]
+## [1.0.0] - 2026-11-26
 
-The next release will be **1.0.0** (the package metadata already says so).
-It is not on PyPI yet.
+The first release since 0.0.11. It is a breaking release: numbers change
+(0.0.x returned wrong quantiles, random draws, means, variances and GARCH
+forecasts), the sign convention of `xi` changes, several names change, and
+the TensorFlow module is removed.
 
 ### Removed
 - **`phat.learn`, the TensorFlow module, and with it the `learn` extra.**

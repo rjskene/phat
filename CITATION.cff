@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "phat-tails: Pareto Hybrids with Asymmetric Tails"
+abstract: >-
+  The Phat distribution is a two-tailed, fully continuous probability
+  distribution for data with heavy tails on both sides: an equal-weight
+  mixture of the hybrid Pareto distribution of Carreau and Bengio and its
+  reflection. The package provides the distribution, maximum-likelihood and
+  two-stage fits, a Hill double-bootstrap estimator of the tail shapes, and
+  a simulator of ARMA-GARCH forecasts with Phat innovations.
+authors:
+  - family-names: Skene
+    given-names: Ryan
+version: 1.0.0
+date-released: "2026-11-26"
+license: MIT
+repository-code: "https://github.com/rjskene/phat"
+url: "https://phat.readthedocs.io"
+keywords:
+  - heavy tails
+  - extreme value theory
+  - generalized Pareto distribution
+  - hybrid Pareto
+  - mixture distribution
+  - GARCH

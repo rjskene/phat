@@ -17,7 +17,7 @@ Phat does not contain the Gaussian distribution: with both shapes at 0 the tails
 The **phat-tails** package provides the distribution, methods to fit it to a univariate dataset, and a simulator for ARMA-GARCH forecasts with Phat innovations.
 
 ## Documentation ##
-[![Documentation Status: latest](https://img.shields.io/readthedocs/ipywidgets?logo=read-the-docs)](https://phat.readthedocs.io/en/latest)
+[![Documentation Status: latest](https://img.shields.io/readthedocs/phat?logo=read-the-docs)](https://phat.readthedocs.io/en/latest)
 
 ## Installation ##
 
@@ -55,7 +55,7 @@ phat_dist = ph.Phat(mu, sigma, xi, xi)
 
 Below is the density, with the Gaussian piece between the two junction points and the two generalized Pareto tails marked.
 
-![png](imgs/output_9_0.png)
+![The Phat density with its Gaussian centre and two generalized Pareto tails](https://raw.githubusercontent.com/rjskene/phat/v1.0.0/imgs/output_9_0.png)
 
 Each tail can have its own shape. Here two Phat distributions share a left shape of 1/2; one has a right shape of 1/2, the other 1/20.
 
@@ -64,7 +64,7 @@ dist1 = ph.Phat(mu, sigma, xi_left=1/2, xi_right=1/2)
 dist2 = ph.Phat(mu, sigma, xi_left=1/2, xi_right=1/20)
 ```
 
-![png](imgs/output_12_0.png)
+![Two Phat densities with different right tail shapes](https://raw.githubusercontent.com/rjskene/phat/v1.0.0/imgs/output_12_0.png)
 
 `Phat` has the usual methods: `pdf`, `cdf`, `sf`, `ppf`, their logarithms, `rvs`, `mean`, `var`, `std` and expected shortfall. Scalars in give scalars out.
 
@@ -123,6 +123,10 @@ xi_left, xi_right = ph.two_tailed_hill_double_bootstrap(x)
 and hold them fixed while the location and scale are fitted.
 
 The package also provides `ph.Garchcaster`, which simulates forecasts from ARMA and GARCH models with Phat innovations.
+
+## Citing ##
+
+Citation metadata is in [CITATION.cff](CITATION.cff); GitHub shows it under "Cite this repository".
 
 ## Also Check Out ##
 
