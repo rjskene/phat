@@ -1,3 +1,96 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "phat-tails"
+version = "1.0.0"
+description = "Pareto Hybrids with Asymmetric Tails: a two-tailed heavy-tailed distribution for Python"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Ryan Skene" }]
+requires-python = ">=3.11"
+keywords = ["heavy tails", "extreme value", "generalized Pareto", "hybrid Pareto", "mixture", "finance"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+# Core: the distribution classes need NumPy and SciPy only.
+dependencies = [
+    "numpy>=1.25",
+    "scipy>=1.11",
+]
+
+[project.optional-dependencies]
+# Phat.fit (maximum likelihood through statsmodels' GenericLikelihoodModel)
+fit = ["statsmodels>=0.14"]
+# JIT-compiled Hill double bootstrap and GARCH forecast loops, progress bars
+speed = ["numba>=0.59", "tqdm>=4.66"]
+# Garchcaster: ARMA-GARCH filtering and forecasting
+garch = ["arch>=6.0", "pandas>=2.0"]
+# Plot helpers in utils.PriceSim and GarchcastResults.plot
+plot = ["matplotlib>=3.8"]
+docs = [
+    "sphinx>=7",
+    "sphinx-book-theme>=1.1",
+    "nbsphinx>=0.9",
+    "nbconvert>=7",
+    "ipython>=8",
+    "ipykernel>=6",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+    # only to re-run the garch and phatgarch notebooks (ARMA fits); not needed to build
+    "pmdarima>=2.1",
+    "pandas>=2.0",
+    "phat-tails[fit,speed,garch]",
+]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "phat-tails[fit,speed,garch,plot]",
+]
+all = ["phat-tails[fit,speed,garch,plot]"]
+
+[project.urls]
+Homepage = "https://github.com/rjskene/phat"
+Documentation = "https://phat.readthedocs.io/en/latest"
+Repository = "https://github.com/rjskene/phat"
+Changelog = "https://github.com/rjskene/phat/blob/master/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning:phat.*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E741",  # ambiguous variable names (mathematical notation)
+    "B008",  # function calls in argument defaults
+    "B905",  # zip without strict=
+    "UP007", # keep Union[...] in long signatures for now
+]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/phat"]
+ignore_missing_imports = true
+implicit_optional = true          # legacy `arg: float = None` signatures in the illustration classes

@@ -2,12 +2,11 @@
 Collection of helper functions
 """
 
-import numpy as np
-import pandas as pd
+from collections.abc import Callable, Iterable, Sequence
 from functools import wraps
-from typing import Union, Iterable, Callable, Sequence
+from typing import Union
 
-import matplotlib.pyplot as plt
+import numpy as np
 
 XTYPE = Union[float, Iterable[Sequence[float]]]
 
@@ -21,16 +20,18 @@ def arrayarize(val:Iterable):
     """
     Converts list-like objects to np.ndarray
     """
-    list_types = (list, tuple, set, pd.Series)
+    list_types = (list, tuple, set)
     if isinstance(val, np.ndarray):
         pass
+    elif hasattr(val, 'to_numpy'):  # pandas Series / DataFrame without importing pandas
+        val = val.to_numpy()
     elif isinstance(val, list_types):
         val = np.array(val)
-    elif isinstance(val, (int, float)):
+    elif isinstance(val, (int, float, np.number)):
         val = np.array([val])
     else:
         text = 'You must provide an iterable of type: '
-        text += ', '.join(list_types)
+        text += ', '.join(t.__name__ for t in list_types)
         raise ValueError(text)
     return val
 
@@ -45,11 +46,11 @@ def argsetter(kws:Union[Iterable, str]='x', flat=False):
                 for k, arg in zip(kws, args):
                     kwargs[k] = arg if flat else arrayarize(arg)
             for k in kws:
-                if k not in kwargs or kwargs[k] is None:                
+                if k not in kwargs or kwargs[k] is None:
                     kwargs[k] = getattr(self, k) if flat else arrayarize(getattr(self, k))
-            
+
             return func(self, **kwargs)
-    
+
         return wrapper
 
     return deco
@@ -57,9 +58,9 @@ def argsetter(kws:Union[Iterable, str]='x', flat=False):
 def dotweight(func) -> Callable:
     """
     Takes the weighted average of values in the array `stack`
-    Weights provided by array `p`. average found via dot product.
+    Weights provided by array `weights`. average found via dot product.
 
-    Used as a wrapper for class methods: `p` must be an attribute of the class instance
+    Used as a wrapper for class methods: `weights` must be an attribute of the class instance
 
     Returns
     --------
@@ -69,10 +70,10 @@ def dotweight(func) -> Callable:
     def wrapper(self, *args, **kwargs) -> np.ndarray:
         stack = func(self, *args, **kwargs)
         if stack.ndim == 3:
-            p = np.tile(self.p, (stack.shape[0],stack.shape[1],1))
+            p = np.tile(self.weights, (stack.shape[0],stack.shape[1],1))
             return np.multiply(p, stack).sum(axis=2)
         else:
-            return (self.p @ stack)
+            return (self.weights @ stack)
 
     return wrapper
 
@@ -97,7 +98,7 @@ class PriceSim:
         self.rets = rets
         self.n = n
         self.periods = periods
-    
+
     @argsetter(['p0', 'rets', 'periods'])
     def sim(self, p0=None, rets=None, periods=None, show_chart:bool=False, *args, **kwargs):
         S = p0*rets.cumprod()
@@ -107,27 +108,28 @@ class PriceSim:
             return rets, S
 
     @argsetter(['p0', 'rets'], flat=True)
-    def sims(self, 
-        p0:float=None, 
-        rets=None, 
-        show_chart:bool=False, 
+    def sims(self,
+        p0:float=None,
+        rets=None,
+        show_chart:bool=False,
         *args, **kwargs
     ):
         S = p0*rets.cumprod(axis=1)
-        
+
         if show_chart:
             return rets, S, self.sims_chart(S, *args, **kwargs)
         else:
             return rets, S
-        
-    def sim_chart(self, rets, S, periods, axes:Iterable=None, title=''):
+
+    def sim_chart(self, rets, S, periods, axes:Sequence | None=None, title=''):
+        import matplotlib.pyplot as plt
         if axes is None:
             fig, axes = plt.subplots(1,2,figsize=(14,5))
         elif len(axes) != 2:
             raise ValueError('Chart requires two subplots')
-        
+
         ax1, ax2 = axes
-        
+
         x = np.arange(periods)
         ax1.plot(x, rets - 1)
         ax2.plot(x, S)
@@ -137,12 +139,13 @@ class PriceSim:
 
         if not title:
             title = 'Phat Price Simulation'
-            
+
         plt.suptitle(title, y=1)
-        
+
         return axes
-    
+
     def sims_chart(self, S, ax=None, title='', *args, **kwargs):
+        import matplotlib.pyplot as plt
         if ax is None:
             fig, ax = plt.subplots(1,1,figsize=(10,6))
 
@@ -154,12 +157,12 @@ class PriceSim:
             kwargs.pop('bins')
         else:
             bins = np.linspace(0, S[:, -1].max(), 250)
-                                
-        counts, bins, _ = ax.hist(S[:, -1], bins=bins, density=True, *args, **kwargs)
+
+        counts, bins, _ = ax.hist(S[:, -1], *args, bins=bins, density=True, **kwargs)
 
         if not title:
             title = 'Distribution of Ending Share Prices'
-        
+
         ax.set_title(title)
 
         return ax, bins

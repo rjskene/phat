@@ -27,7 +27,6 @@ Pareto Hybrids with Asymmetric Tails
    notebooks/pot_ref
    notebooks/dblbs
    notebooks/mle_fit
-   notebooks/nn_fit
 
 .. toctree::
    :caption: Forecast

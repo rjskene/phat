@@ -9,20 +9,18 @@
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-import os
-import sys
-sys.path.insert(0, os.path.abspath('../'))
-
-sys.path.append(os.path.abspath('./ext'))
+# The package is installed into the build environment (see .readthedocs.yaml),
+# so autodoc imports it without any path manipulation.
 
 # -- Project information -----------------------------------------------------
 
 project = 'phat-tails'
 copyright = u'2021 Ryan Skene. All rights reserved.'
-author = 'rskene'
+author = 'Ryan Skene'
 
 # The full version, including alpha/beta/rc tags
-release = '0.0.11'
+from importlib.metadata import version as _pkg_version
+release = _pkg_version('phat-tails')
 
 # -- General configuration ---------------------------------------------------
 
@@ -30,11 +28,12 @@ release = '0.0.11'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'custom_nbsphinx',
+    'nbsphinx',
     'sphinx.ext.mathjax',
     'IPython.sphinxext.ipython_console_highlighting',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
+    'sphinx.ext.napoleon',     # NumPy-style docstring sections
 ]
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -42,7 +41,29 @@ templates_path = ['_templates']
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store', '**.ipynb_checkpoints']
+
+# Notebooks are committed with their outputs, produced on fixed seeds and the
+# bundled data. The docs build renders them and never re-executes them.
+nbsphinx_execute = 'never'
+
+# Code cells tagged `hide_input` (the plotting boilerplate) show their output
+# only. nbsphinx has no option for this, so the tag is translated here into the
+# marker nbconvert's templates already understand (what its
+# TagRemovePreprocessor sets).
+import nbsphinx  # noqa: E402
+
+_export_notebook = nbsphinx.Exporter.from_notebook_node
+
+
+def _export_hiding_tagged_inputs(self, nb, resources=None, **kwargs):
+    for cell in nb.cells:
+        if cell.cell_type == 'code' and 'hide_input' in cell.metadata.get('tags', []):
+            cell.metadata['transient'] = {'remove_source': True}
+    return _export_notebook(self, nb, resources, **kwargs)
+
+
+nbsphinx.Exporter.from_notebook_node = _export_hiding_tagged_inputs
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -51,11 +72,11 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 #
 html_theme = 'sphinx_book_theme'
 html_theme_options = {
-    'repository_url': 'https://github.com/spatialaudio/nbsphinx',
+    'repository_url': 'https://github.com/rjskene/phat',
     'use_repository_button': True,
     'use_issues_button': True,
     'use_edit_page_button': True,
-    'path_to_docs': 'doc',
+    'path_to_docs': 'docs',
 }
 mathjax3_config = {
     'tex': {'displayMath': [],
