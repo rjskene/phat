@@ -56,6 +56,8 @@ docs = [
     "ipykernel>=6",
     "matplotlib>=3.8",
     "seaborn>=0.13",
+    # only to re-run the garch and phatgarch notebooks (ARMA fits); not needed to build
+    "pmdarima>=2.1",
     "pandas>=2.0",
     "phat-tails[fit,speed,garch]",
 ]

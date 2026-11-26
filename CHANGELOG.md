@@ -103,6 +103,10 @@ It is not on PyPI yet.
   fixed shapes print to six decimals.
 - The Hill double bootstrap no longer emits tqdm's "IProgress not found"
   warning in Jupyter when `ipywidgets` is missing.
+- `phat.bootstrap`, `phat.fit`, `phat.learn`, `phat.tseries` and `phat.utils`
+  are reachable as attributes again (`ph.bootstrap.numpy.dbl_bs`), as they
+  were when 0.0.x imported everything eagerly. They are still imported only
+  on first use.
 - Asking for a name whose optional dependency is missing (`phat.PhatNet`
   without TensorFlow or pandas) raises an `ImportError` that names the extra
   to install, `pip install "phat-tails[learn]"`.

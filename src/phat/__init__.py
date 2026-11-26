@@ -37,7 +37,12 @@ __all__ = [
 ]
 
 
+_SUBMODULES = ("bootstrap", "fit", "learn", "tseries", "utils")
+
+
 def __getattr__(name: str):
+    if name in _SUBMODULES:
+        return import_module(f"phat.{name}")
     module = _LAZY.get(name)
     if module is None:
         raise AttributeError(f"module 'phat' has no attribute {name!r}")
@@ -54,4 +59,4 @@ def __getattr__(name: str):
 
 
 def __dir__():
-    return sorted(set(globals()) | set(_LAZY))
+    return sorted(set(globals()) | set(_LAZY) | set(_SUBMODULES))

@@ -39,6 +39,13 @@ def test_garchcaster_and_bootstrap_do_not_import_tensorflow_arch_or_pandas():
     assert _loaded_in_fresh_interpreter(code) == '[]'
 
 
+def test_submodules_are_reachable_as_attributes():
+    # 0.0.x imported every submodule eagerly, so `ph.bootstrap.numpy.dbl_bs` worked
+    code = ("import phat as ph; "
+            "print(ph.bootstrap.numpy.dbl_bs.__name__, ph.tseries.Garchcaster.__name__, ph.fit.fit_phat.__name__)")
+    assert _loaded_in_fresh_interpreter(code) == 'dbl_bs Garchcaster fit_phat'
+
+
 def test_missing_optional_dependency_names_the_extra(monkeypatch):
     import sys
     for mod in [m for m in sys.modules if m.startswith('phat.learn')]:
