@@ -11,6 +11,38 @@ The next release will be **1.0.0** (the package metadata already says so).
 It is not on PyPI yet.
 
 ### Fixed
+- `Garchcaster` forecasts were wrong except for a constant-mean GARCH(1,1) built
+  with `use_backcast=False`. On identical innovations a forecast built from a
+  fitted `arch` model now equals that model's own simulation forecast to
+  machine precision (tested for zero, constant and AR means with GARCH(1,1),
+  (1,2), (2,1) and (2,2)). Five separate defects:
+  - the default `use_backcast=True` replaced the last residuals with a
+    weighted average of the *squared* residuals at the *start* of the sample,
+    which was then squared again; the first forecast variance was wrong. The
+    argument is deprecated and has no effect; a forecast always starts from
+    the last residuals and conditional volatilities;
+  - with more than one lag, coefficient `k` multiplied lag `maxlag + 1 - k`
+    instead of lag `k`, and after the first step every lag held the newest
+    value (the histories were overwritten before they were shifted);
+  - the AR recursion started from the standardized residuals of the GARCH fit
+    instead of the observed series (`arch` models) or the series the ARMA was
+    fitted to (`pmdarima` models);
+  - for a fitted `arch` GARCH with different numbers of ARCH and GARCH terms
+    the two sets of coefficients were mixed up (`arch` calls the number of
+    squared-residual lags `p`; this package, like Bollerslev, calls it `q`);
+    a zero-mean `arch` model had its `omega` read as the mean;
+  - a `pmdarima` model always contributed its first five parameters, so an
+    order with `m + n > 4` lost coefficients and one fitted without an
+    intercept had its first AR coefficient read as the constant.
+
+  Models the recursion cannot represent now raise `NotImplementedError`
+  instead of giving wrong numbers: asymmetric (GJR), power and exponential
+  GARCH, HAR and non-consecutive AR lags, exogenous regressors, and
+  differenced or seasonal ARIMA. The docstring now states the model, the
+  parameter order and what each history must contain (`y` is the series being
+  forecast, not standardized residuals). When both a `pmdarima` and an `arch`
+  model are given, the constant of the `arch` model (fitted to the ARMA
+  residuals) is still not used; this is now documented.
 - `Garchcaster` kept `resids[:-maxlag:]` (everything but the last `maxlag`
   values) as its residual history when `use_backcast=False`; it now keeps the
   last `maxlag` residuals. `Garchcaster.dist` is documented to return `None`

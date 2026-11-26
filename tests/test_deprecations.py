@@ -140,7 +140,7 @@ class TestPhatStack:
 
 class TestGarchcaster:
     KW = dict(garch=[0.1, 0.1, 0.8], arma=[0.05], y=np.array([0.5, -0.3]),
-              vols=np.array([1.1, 1.2]), resids=np.array([0.4, -0.6]), use_backcast=False)
+              vols=np.array([1.1, 1.2]), resids=np.array([0.4, -0.6]))
 
     def test_constructor_keywords_and_attributes(self):
         new = Garchcaster(**self.KW, n_paths=4, horizon=5)

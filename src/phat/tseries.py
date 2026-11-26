@@ -3,6 +3,7 @@ Custom functionality for generating ARMA-GARCH time-series forecasts.
 """
 from __future__ import annotations
 
+import re
 import warnings
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, Union
@@ -46,9 +47,47 @@ def _is_arch_result(obj) -> bool:
     return all(hasattr(obj, name) for name in needed)
 
 
-def _is_constant_mean(model) -> bool:
-    """``arch.univariate.mean.ConstantMean``: a mean model without lags."""
-    return type(model).__name__ == 'ConstantMean' or getattr(model, 'lags', None) is None
+def _arch_mean(result) -> tuple[np.ndarray, int, int]:
+    """
+    ``(c, phi_1..phi_m)``, ``m`` and the number of mean parameters of a fitted
+    ``arch`` model.
+
+    Zero-mean, constant-mean and AR models with consecutive lags are supported.
+    The mean is read from the model's parameter names: ``Const`` or ``mu`` for
+    the constant and ``name[k]`` for lag ``k``.
+    """
+    model = result.model
+    if getattr(model, 'x', None) is not None:
+        raise NotImplementedError('Garchcaster does not support mean models with exogenous regressors')
+    names = list(model.parameter_names())
+    has_constant = bool(names) and names[0] in ('Const', 'mu')
+    lag_names = names[1:] if has_constant else names
+    lags = [re.fullmatch(r'.*\[(\d+)\]', name) for name in lag_names]
+    m = len(lags)
+    found = [int(lag.group(1)) for lag in lags if lag is not None]
+    if len(found) != m or found != list(range(1, m + 1)):
+        raise NotImplementedError('Garchcaster supports AR mean models with consecutive lags 1..m only')
+    params = np.asarray(result.params, dtype=float)[:len(names)]
+    return (params.copy() if has_constant else np.concatenate(([0.0], params))), m, len(names)
+
+
+def _arch_vol_order(volatility) -> tuple[int, int]:
+    """
+    ``(p, q)`` of a fitted ``arch`` volatility process in this module's convention:
+    ``p`` lagged variances and ``q`` lagged squared residuals (``arch`` calls
+    them ``q`` and ``p``).
+    """
+    name = type(volatility).__name__
+    if name == 'ConstantVariance':
+        return (0, 0)
+    if name not in ('GARCH', 'ARCH'):
+        raise NotImplementedError(f'Garchcaster does not support the {name} volatility process')
+    if getattr(volatility, 'o', 0) != 0 or getattr(volatility, 'power', 2.0) != 2.0:
+        raise NotImplementedError(
+            'Garchcaster simulates symmetric GARCH on variances only; '
+            'asymmetric terms (o > 0) and powers other than 2 are not supported'
+        )
+    return (int(getattr(volatility, 'q', 0)), int(volatility.p))
 
 
 def _is_pmdarima_arima(obj) -> bool:
@@ -56,30 +95,48 @@ def _is_pmdarima_arima(obj) -> bool:
     return hasattr(obj, 'order') and callable(getattr(obj, 'params', None)) and hasattr(obj, 'arima_res_')
 
 
-###### Numba helper functions to improve GarchForecast speed ######
+def _pmdarima_mean(arima) -> tuple[np.ndarray, tuple[int, int]]:
+    """``(c, phi_1..phi_m, theta_1..theta_n)`` and ``(m, n)`` of a fitted ``pmdarima.ARIMA``."""
+    m, d, n = (int(v) for v in arima.order)
+    if d != 0:
+        raise NotImplementedError('Garchcaster does not support differenced ARIMA models (d > 0)')
+    seasonal = getattr(arima, 'seasonal_order', None)
+    if seasonal is not None and any(seasonal[:3]):
+        raise NotImplementedError('Garchcaster does not support seasonal ARIMA models')
+    params = np.asarray(arima.params(), dtype=float)
+    names = getattr(arima.arima_res_, 'param_names', None)
+    has_constant = 'intercept' in names if names else bool(getattr(arima, 'with_intercept', True))
+    if has_constant:
+        return params[:1 + m + n].copy(), (m, n)
+    return np.concatenate(([0.0], params[:m + n])), (m, n)
+
+
 @_njit(cache=True)
-def _step_sum(
+def _lag_sum(
     params:np.ndarray,
     values:np.ndarray
     ) -> float:
     """
-    Summation term of an AR(m), MA(n), or GARCH(p) / GARCH(q) process
+    Summation term of an AR(m), MA(n), ARCH(q) or GARCH(p) process:
 
-    Each order-specific, fitted relationship parameter is multiplied by the
-    corresponding order-specific lagged value, then summed across all the orders
-    for that process.
+    .. math::
+
+        \\sum_{k=1}^{K} \\text{params}_k \\, \\text{values}_{t-k}
+
+    ``values`` is a history running from oldest to newest, so lag ``k`` is its
+    ``k``-th value from the end and ``params[k-1]`` is the coefficient of lag ``k``.
 
     Params
     -------
-    params:     np.ndarray; fitted parameters corresponding to the process
-    values:     np.ndarray; lagged value against which the parameter is multiplied
-
+    params:     np.ndarray; fitted coefficients, lag 1 first
+    values:     np.ndarray; history of the lagged quantity, most recent value last
     """
-    sums = np.zeros(values.shape)
-    for i in range(values.shape[0]):
-        sums[i] = params[i]*values[i]
+    total = 0.0
+    last = values.shape[0] - 1
+    for k in range(params.shape[0]):
+        total += params[k]*values[last - k]
 
-    return np.sum(sums)
+    return total
 
 @_njit(cache=True)
 def _arma_one_step(
@@ -97,16 +154,16 @@ def _arma_one_step(
 
     Params
     -------
-    y:              np.ndarray; historical standardized residuals of ARMA-GARCH fit up to `maxlag` periods ago
-    resids:         np.ndarray; historical residuals of ARMA-GARCH fit up to `maxlag` periods ago
-    constant:       float; constant of the mean process4
+    y:              np.ndarray; last `maxlag` values of the series, most recent last
+    resids:         np.ndarray; last `maxlag` residuals of the ARMA-GARCH fit, most recent last
+    constant:       float; constant of the mean process
     ar_params:      np.ndarray; paramters of the AR process
     ma_params:      np.ndarray; paramters of the MA process
     m:              int; order of the AR process
     n:              int; order of the MA process
     """
-    ar = _step_sum(ar_params, y[-m:]) if m != 0 else 0
-    ma = _step_sum(ma_params, resids[-n:]) if n != 0 else 0
+    ar = _lag_sum(ar_params, y) if m != 0 else 0.0
+    ma = _lag_sum(ma_params, resids) if n != 0 else 0.0
 
     return constant + ar + ma
 
@@ -148,8 +205,8 @@ def _garch_one_step(
 
     Remember for GARCH we work with volatilities so we must square them and the residuals.
     """
-    arch = _step_sum(arch_params, resids[-q:]**2) if q != 0 else 0
-    garch = _step_sum(garch_params, vols[-p:]**2) if p != 0 else 0
+    arch = _lag_sum(arch_params, resids**2) if q != 0 else 0.0
+    garch = _lag_sum(garch_params, vols**2) if p != 0 else 0.0
 
     var_t = constant + arch + garch
     resid_t = np.sqrt(var_t)*innov
@@ -454,36 +511,60 @@ class GarchcastResults:
 
 class Garchcaster:
     """
-Class for forecasting time series via ARMA-GARCH process.
+Simulates an ARMA(m, n)-GARCH(p, q) process forward from the end of a sample:
 
-Instances of a `pmdarima`-based ARIMA object and/or an ARCHModelResult from the
-`arch` package can be provided directly. Alternatively, the user can provide all
-residuals, standardized residuals, conditional volatilities, the parameters for
-the ARMA-GARCH process, and the order.
+.. math::
+
+    y_t = c + \\sum_{i=1}^m \\phi_i y_{t-i} + \\sum_{j=1}^n \\theta_j \\epsilon_{t-j} + \\epsilon_t,
+    \\qquad \\epsilon_t = \\sigma_t z_t,
+
+    \\sigma_t^2 = \\omega + \\sum_{k=1}^q \\alpha_k \\epsilon_{t-k}^2 + \\sum_{l=1}^p \\beta_l \\sigma_{t-l}^2
+
+with unit-variance innovations :math:`z_t`. Every path starts from the last
+observed values, residuals and conditional volatilities of the sample, so on
+the same innovations a forecast built from a fitted ``arch`` model equals that
+model's own simulation forecast.
+
+``p`` counts the lagged variances and ``q`` the lagged squared residuals, as in
+Bollerslev (1986). The ``arch`` package uses the two letters the other way
+round; models fitted with ``arch`` are translated.
+
+Fitted models can be passed directly: a ``pmdarima`` ``ARIMA`` as `arma` and/or
+an ``arch`` result as `garch`. Otherwise give the parameters and the histories.
+Supported fitted models are zero-mean, constant-mean and AR mean models with
+consecutive lags and no exogenous regressors, constant variance, ARCH and
+symmetric GARCH, and ARMA models without differencing or seasonal terms.
 
 Params:
-    arma: instance of pmdarima ARIMA class OR iterable of floats
-        Either provide a pmdarima instance or the params derived from any arima process.
-        If None, will search for AR process in `garch`, otherwise assumes ConstantMean.
-    garch: instance of arch ARCHModelResult class OR iterable of floats
-        either provide an ARCHModelResult instance or the params derived from any garch process
-    y:  float or iterable of floats
-        history of standardized residuals after filtering an ARMA-GARCH. Only required if
-        garch is not ARCHModelResult type.
-    vols: float or iterable of floats
-        history of conditional volatilities resulting from an ARMA-GARCH process. Only required if
-        garch is not ARCHModelResult type.
-    resids: float or iterable of floats
-        history of residuals after filtering an ARMA-GARCH. Only required if garch is not an
-        ARCHModelResult.
+    garch: fitted ``arch`` model (``ARCHModelResult``) OR iterable of floats
+        The parameters are ordered ``omega, alpha_1..alpha_q, beta_1..beta_p``.
+        When `arma` is also given, the ``arch`` model is the one fitted to the
+        ARMA residuals; only its volatility parameters are used, its mean is not.
+    arma: fitted ``pmdarima.ARIMA`` OR iterable of floats
+        The parameters are ordered ``c, phi_1..phi_m, theta_1..theta_n``. If
+        ``None`` the mean process is taken from `garch`.
+    y:  iterable of floats
+        The series being forecast, oldest value first; the last ``m`` values
+        start the AR recursion. Required when `garch` is given as parameters,
+        and when `arma` is given as parameters with a fitted `garch`.
+    vols: iterable of floats
+        Conditional volatilities of the fit, oldest first. Only with `garch`
+        given as parameters.
+    resids: iterable of floats
+        Residuals :math:`\\epsilon_t` of the fit (not standardized), oldest first.
+        Only with `garch` given as parameters.
     n_paths: int
         number of simulated paths
     horizon: int
         number of periods forecast along each path
+    order: tuple ``(m, n, p, q)``
+        Only needed with parameters; inferred from fitted models.
     dist: Phat or scipy rv_frozen class
-        distribution used to generate residuals
+        distribution of the innovations; standard Gaussian when ``None``
     use_backcast: bool
-        use procedure to smooth values. See `here <https://arch.readthedocs.io/en/latest/univariate/generated/generated/arch.univariate.GARCH.backcast.html>`_.
+        Deprecated and without effect. In 0.0.x the default replaced the last
+        residuals with a weighted average of the squared residuals at the
+        *start* of the sample, which made the first forecast variance wrong.
     """
     GARCH_HAS_MEAN_PROCESS = False
 
@@ -502,29 +583,35 @@ Params:
         horizon:int=252,
         order:tuple[int, ...] | None=None,
         dist:ALLOWED_DISTS | None=None,
-        use_backcast:bool=True,
+        use_backcast:bool | None=None,
         ):
+        if use_backcast is not None:
+            warnings.warn(
+                '`use_backcast` is deprecated and has no effect: a forecast starts from the last '
+                'residuals and conditional volatilities of the sample.',
+                DeprecationWarning, stacklevel=3,
+            )
         garch_any: Any = garch   # fitted models are duck-typed; see _is_arch_result
         arma_any: Any = arma
         mean_order: tuple[int, int] | None
         vol_order: tuple[int, int] | None
+        garch_is_fitted = _is_arch_result(garch_any)
+        arma_is_fitted = _is_pmdarima_arima(arma_any)
+        n_arch_mean = 0   # leading parameters of a fitted arch model that belong to its mean
 
         ### First, set self.mean
-        if _is_pmdarima_arima(arma_any):
-            m, _, n = arma_any.order
-            mean_order = (m,n)
-            mean_params = arma_any.params()[:5]
-        elif _is_arch_result(garch_any):
-            if _is_constant_mean(garch_any.model):
-                mean_order = (0, 0)
-                mean_params = garch_any.params[:1]
-            else:
-                mean_order = (garch_any.model.lags[0].size, 0)
-                mean_params = garch_any.params[:mean_order[0]+1]
-                self.GARCH_HAS_MEAN_PROCESS = True
+        if garch_is_fitted:
+            arch_mean_params, arch_lags, n_arch_mean = _arch_mean(garch_any)
+
+        if arma_is_fitted:
+            mean_params, mean_order = _pmdarima_mean(arma_any)
         elif arma is not None:
             mean_order = (int(order[0]), int(order[1])) if order is not None else None
             mean_params = arrayarize(arma_any)
+        elif garch_is_fitted:
+            mean_order = (arch_lags, 0)
+            mean_params = arch_mean_params
+            self.GARCH_HAS_MEAN_PROCESS = arch_lags > 0
         else:
             raise ValueError(
                 'Provide `arma` (parameters or a fitted model) or a fitted `arch` model as `garch`'
@@ -533,14 +620,9 @@ Params:
         self.mean = MEAN(mean_params, order=mean_order)
 
         ### Second, set self.vol
-        if _is_arch_result(garch_any):
-            if hasattr(garch_any.model.volatility, 'p'):
-                vol_order = (garch_any.model.volatility.p, garch_any.model.volatility.q)
-            else:
-                vol_order = (0, 0)
-
-            first = self.mean.m + 1 if self.GARCH_HAS_MEAN_PROCESS else 1
-            vol_params = garch_any.params[first:]
+        if garch_is_fitted:
+            vol_order = _arch_vol_order(garch_any.model.volatility)
+            vol_params = np.asarray(garch_any.params, dtype=float)[n_arch_mean:]
         elif garch is not None:
             vol_params = arrayarize(garch_any)
             vol_order = (int(order[2]), int(order[3])) if order is not None else None
@@ -550,21 +632,32 @@ Params:
         self.vol = VOL(vol_params, order=vol_order)
         self.order = (*self.mean.order, *self.vol.order)
 
-        if order is not None and order != self.order:
+        if order is not None and tuple(order) != self.order:
             msg = 'The `order` parameter provided does not match the order'
             msg += ' inferred from the models provided and has been OVERRIDDEN. The `order` parameter'
             msg += ' is not required when passing `arch` and/or pmdarima models to Garchcaster.'
-            warnings.warn(msg, stacklevel=2)
+            warnings.warn(msg, stacklevel=3)
 
         self.maxlag = max(self.order)
 
-        ### Third, assign values
-        if _is_arch_result(garch_any):
-            if any([y is not None, vols is not None, resids is not None]):
-                raise ValueError('If `garch` is ARCHModelResult do not provide `y`, `vol`, or `resids`')
-            y_arr = np.asarray(garch_any.std_resid, dtype=float)[self.maxlag:].copy()
-            vols_arr = np.asarray(garch_any.conditional_volatility, dtype=float)[self.maxlag:].copy()
-            resids_arr = np.asarray(garch_any.resid, dtype=float)[self.maxlag:].copy()
+        ### Third, the histories each path starts from
+        if garch_is_fitted:
+            if vols is not None or resids is not None:
+                raise ValueError('If `garch` is a fitted arch model do not provide `vols` or `resids`')
+            vols_arr = np.asarray(garch_any.conditional_volatility, dtype=float)
+            resids_arr = np.asarray(garch_any.resid, dtype=float)
+            if arma_is_fitted:
+                if y is not None:
+                    raise ValueError('If `arma` is a fitted model do not provide `y`')
+                y_arr = np.asarray(arma_any.arima_res_.model.endog, dtype=float).ravel()
+            elif arma is not None:
+                if y is None and self.mean.m > 0:
+                    raise ValueError('Provide `y`, the series the ARMA parameters were fitted to')
+                y_arr = arrayarize(y).astype(float) if y is not None else resids_arr
+            else:
+                if y is not None:
+                    raise ValueError('If `garch` is a fitted arch model with its own mean do not provide `y`')
+                y_arr = np.asarray(garch_any.model.y, dtype=float)
         else:
             if y is None or vols is None or resids is None:
                 raise ValueError('Provide `y`, `vols` and `resids` when `garch` is not a fitted arch model')
@@ -575,13 +668,30 @@ Params:
         self.horizon = horizon
         self.n_paths = n_paths
 
-        self.y_hist = y_arr[-self.maxlag:]
-        self.vols_hist = vols_arr[-self.maxlag:]
-        self.resids_hist = (
-            self._backcast(resids_arr, self.maxlag) if use_backcast else resids_arr[-self.maxlag:]
-        )
+        keep = max(self.maxlag, 1)
+        for name, arr, need in (
+            ('y', y_arr, self.mean.m),
+            ('vols', vols_arr, self.vol.p),
+            ('resids', resids_arr, max(self.mean.n, self.vol.q)),
+        ):
+            tail = arr[-need:] if need else arr[:0]
+            if arr.size < need or not np.isfinite(tail).all():
+                raise ValueError(
+                    f'`{name}` needs at least {need} finite trailing values for order {self.order}'
+                )
+        self.y_hist = self._tail(y_arr, keep)
+        self.vols_hist = self._tail(vols_arr, keep)
+        self.resids_hist = self._tail(resids_arr, keep)
 
         self._dist = dist
+
+    @staticmethod
+    def _tail(arr: np.ndarray, keep: int) -> np.ndarray:
+        """The last `keep` values, padded with zeros in front when the history is shorter."""
+        out = np.zeros(keep)
+        tail = arr[-keep:]
+        out[keep - tail.size:] = tail
+        return np.where(np.isfinite(out), out, 0.0)
 
     @property
     def dist(self) -> ALLOWED_DISTS | None:
@@ -624,15 +734,6 @@ Params:
         rvfunc = dist.std_rvs if hasattr(dist, 'std_rvs') else dist.rvs
         return np.asarray(rvfunc(size=shape, random_state=rng), dtype=float)
 
-    def _backcast(self, resids: np.ndarray, maxlag: int) -> np.ndarray:
-        power = 2
-        tau = min(75, resids.shape[0])
-        w = 0.94 ** np.arange(tau)
-        w = w / sum(w)
-        backcast = np.sum((abs(resids[:tau]) ** power) * w)
-
-        return np.repeat(backcast, maxlag)
-
     @staticmethod
     @_njit(cache=True)
     def _forecast_looper(
@@ -661,9 +762,9 @@ Params:
 
         Params
         -------
-        y:              np.ndarray; historical standardized residuals of ARMA-GARCH fit, last `maxlag` periods
-        vols:           np.ndarray; historical volatilities of ARMA-GARCH fit up to `maxlag` periods ago
-        resids:         np.ndarray; historical residuals of ARMA-GARCH fit up to `maxlag` periods ago
+        y:              np.ndarray; last `maxlag` values of the series, most recent last
+        vols:           np.ndarray; last `maxlag` conditional volatilities, most recent last
+        resids:         np.ndarray; last `maxlag` residuals, most recent last
         innovs:         n_paths x horizon np.ndarray of garch residuals
         n_paths:        int; number of simulated paths
         horizon:        int; number of periods forecast along each path
@@ -686,17 +787,14 @@ Params:
                 vols_[i, t] = np.sqrt(var_t)
                 resids_[i, t] = resid_t
 
+                # drop the oldest value of each history, then append the new one
+                for k in range(y_i.size - 1):
+                    y_i[k] = y_i[k + 1]
+                    vols_i[k] = vols_i[k + 1]
+                    resids_i[k] = resids_i[k + 1]
                 y_i[-1] = y_[i, t]
                 vols_i[-1] = vols_[i, t]
                 resids_i[-1] = resids_[i, t]
-
-                if y.size > 1:
-                    y_i[-y_i.size:-1] = y_i[-y_i.size+1:]
-                    vols_i[-y_i.size:-1] = vols_i[-y_i.size+1:]
-                    resids_i[-y_i.size:-1] = resids_i[-y_i.size+1:]
-
-                # if np.isnan(y_).any() or np.isnan(y).any():
-                #     print (i, t, mu_t, resid_t, innovs[i,t], y, vols, resids)
         return y_, vols_, resids_
 
     @renamed_kwargs(iters='n_paths', periods='horizon')

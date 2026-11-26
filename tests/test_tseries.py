@@ -42,7 +42,8 @@ def test_garchcaster_and_bootstrap_do_not_import_tensorflow_arch_or_pandas():
 def test_submodules_are_reachable_as_attributes():
     # 0.0.x imported every submodule eagerly, so `ph.bootstrap.numpy.dbl_bs` worked
     code = ("import phat as ph; "
-            "print(ph.bootstrap.numpy.dbl_bs.__name__, ph.tseries.Garchcaster.__name__, ph.fit.fit_phat.__name__)")
+            "print(ph.bootstrap.numpy.dbl_bs.__name__, ph.tseries.Garchcaster.__name__, "
+            "ph.fit.fit_phat.__name__)")
     assert _loaded_in_fresh_interpreter(code) == 'dbl_bs Garchcaster fit_phat'
 
 
@@ -96,7 +97,7 @@ class TestArrayConstructor:
             y=np.array([0.5, -0.3]),
             vols=np.array([1.1, 1.2]),
             resids=np.array([0.4, -0.6]),
-            n_paths=4, horizon=5, use_backcast=False,
+            n_paths=4, horizon=5,
         )
 
     def test_order_and_history(self, cast):
@@ -209,7 +210,8 @@ class TestArchIntegration:
         assert np.isclose(cast.vol.arch_params[0], garch_res.params['alpha[1]'])
         assert np.isclose(cast.vol.garch_params[0], garch_res.params['beta[1]'])
         assert cast.y_hist.size == cast.vols_hist.size == cast.resids_hist.size == 1
-        assert np.isclose(cast.y_hist[0], garch_res.std_resid.iloc[-1])
+        assert np.isclose(cast.y_hist[0], garch_res.model.y.iloc[-1])
+        assert np.isclose(cast.resids_hist[0], garch_res.resid.iloc[-1])
         assert np.isclose(cast.vols_hist[0], garch_res.conditional_volatility.iloc[-1])
 
     def test_forecast_smoke(self, garch_res):
@@ -231,3 +233,179 @@ class TestArchIntegration:
     def test_rejects_history_arrays_with_arch_result(self, garch_res):
         with pytest.raises(ValueError):
             Garchcaster(garch=garch_res, y=[1.0])
+
+
+def _reference_paths(c, ar, ma, omega, alpha, beta, y, vols, resids, innovs):
+    """Plain-Python ARMA-GARCH recursion; every history runs oldest to newest."""
+    out_y, out_var = np.zeros(innovs.shape), np.zeros(innovs.shape)
+    for i in range(innovs.shape[0]):
+        ys, vs, es = list(y), list(vols), list(resids)
+        for t in range(innovs.shape[1]):
+            var = omega + sum(a * es[-1 - k] ** 2 for k, a in enumerate(alpha))
+            var += sum(b * vs[-1 - k] ** 2 for k, b in enumerate(beta))
+            e = np.sqrt(var) * innovs[i, t]
+            mean = c + sum(p * ys[-1 - k] for k, p in enumerate(ar))
+            mean += sum(q * es[-1 - k] for k, q in enumerate(ma))
+            ys.append(mean + e)
+            vs.append(np.sqrt(var))
+            es.append(e)
+            out_y[i, t], out_var[i, t] = mean + e, var
+    return out_y, out_var
+
+
+class TestRecursionWithSeveralLags:
+    """Lag k of a history is its k-th value from the end; coefficient k multiplies lag k."""
+    y = np.array([0.9, -0.4, 0.25])
+    vols = np.array([1.3, 0.8, 1.1])
+    resids = np.array([0.7, -0.5, 0.3])
+    innovs = np.random.default_rng(3).standard_normal((3, 8))
+
+    def test_arma22_garch11(self):
+        c, ar, ma, vol = 0.02, [0.3, -0.2], [0.15, 0.4], [0.05, 0.1, 0.85]
+        cast = Garchcaster(
+            arma=[c, *ar, *ma], garch=vol, order=(2, 2, 1, 1),
+            y=self.y, vols=self.vols, resids=self.resids, n_paths=3, horizon=8,
+        )
+        res = cast.forecast(innovs=self.innovs)
+        want_y, want_var = _reference_paths(
+            c, ar, ma, 0.05, [0.1], [0.85], self.y, self.vols, self.resids, self.innovs)
+        assert np.allclose(res.values, want_y, rtol=0, atol=1e-12)
+        assert np.allclose(res.vars, want_var, rtol=0, atol=1e-12)
+
+    def test_ar3_garch22(self):
+        c, ar = -0.01, [0.2, 0.1, -0.3]
+        cast = Garchcaster(
+            arma=[c, *ar], garch=[0.04, 0.07, 0.03, 0.5, 0.3], order=(3, 0, 2, 2),
+            y=self.y, vols=self.vols, resids=self.resids, n_paths=3, horizon=8,
+        )
+        res = cast.forecast(innovs=self.innovs)
+        want_y, want_var = _reference_paths(
+            c, ar, [], 0.04, [0.07, 0.03], [0.5, 0.3], self.y, self.vols, self.resids, self.innovs)
+        assert np.allclose(res.values, want_y, rtol=0, atol=1e-12)
+        assert np.allclose(res.vars, want_var, rtol=0, atol=1e-12)
+
+    def test_use_backcast_is_deprecated_and_has_no_effect(self):
+        kwargs = dict(arma=[0.05], garch=[0.1, 0.1, 0.8], y=self.y, vols=self.vols, resids=self.resids,
+                      n_paths=3, horizon=8)
+        plain = Garchcaster(**kwargs).forecast(innovs=self.innovs)
+        with pytest.warns(DeprecationWarning, match='use_backcast'):
+            cast = Garchcaster(use_backcast=True, **kwargs)
+        assert cast.resids_hist.tolist() == [0.3]
+        assert np.array_equal(cast.forecast(innovs=self.innovs).values, plain.values)
+
+
+@pytest.mark.skipif(not HAS_ARCH, reason='needs the garch extra (arch, pandas)')
+class TestPathsMatchArch:
+    """On identical innovations a forecast reproduces ``arch``'s own simulation."""
+    innovs = np.random.default_rng(11).standard_normal((4, 12))
+
+    @staticmethod
+    def _fit(mean, p, q, o=0):
+        import pandas as pd
+        from arch.univariate import ARX, GARCH, ConstantMean, ZeroMean
+        rets = pd.read_csv(RETURNS, index_col='Date')['YELP']
+        if mean == 'constant':
+            model = ConstantMean(rets)
+        elif mean == 'zero':
+            model = ZeroMean(rets)
+        elif mean == 'ar2 without constant':
+            model = ARX(rets, lags=2, constant=False)
+        else:
+            model = ARX(rets, lags=mean)
+        model.volatility = GARCH(p=p, o=o, q=q)
+        return model.fit(disp='off')
+
+    def _arch_paths(self, res):
+        sim = res.forecast(
+            horizon=self.innovs.shape[1], simulations=self.innovs.shape[0],
+            method='simulation', rng=lambda size: self.innovs.reshape(size), reindex=False,
+        ).simulations
+        # `variances` is the variance of the series, which an AR mean accumulates over the
+        # horizon; `residual_variances` is the conditional variance of the residual
+        return sim.values[0], sim.residual_variances[0]
+
+    @pytest.mark.parametrize('mean, p, q', [
+        ('constant', 1, 1),
+        ('constant', 2, 2),
+        ('constant', 2, 1),
+        ('constant', 1, 2),
+        ('zero', 1, 1),
+        ([1, 2], 1, 1),
+        ([1, 2, 3], 2, 1),
+        ('ar2 without constant', 1, 1),
+    ])
+    def test_forecast_matches_arch(self, mean, p, q):
+        res = self._fit(mean, p, q)
+        want_y, want_var = self._arch_paths(res)
+        got = Garchcaster(garch=res, n_paths=4, horizon=12).forecast(innovs=self.innovs)
+        assert np.allclose(got.values, want_y, rtol=0, atol=1e-9)
+        assert np.allclose(got.vars, want_var, rtol=0, atol=1e-9)
+
+    def test_asymmetric_garch_is_rejected(self):
+        res = self._fit('constant', 1, 1, o=1)
+        with pytest.raises(NotImplementedError, match='asymmetric'):
+            Garchcaster(garch=res)
+
+    def test_unsupported_mean_models_are_rejected(self):
+        import pandas as pd
+        from arch.univariate import ARX, HARX
+        rets = pd.read_csv(RETURNS, index_col='Date')['YELP']
+        for model in (ARX(rets, lags=[1, 3]), HARX(rets, lags=[1, 5])):
+            with pytest.raises(NotImplementedError, match='consecutive lags'):
+                Garchcaster(garch=model.fit(disp='off'))
+
+    def test_ar_history_is_the_observed_series(self):
+        res = self._fit([1, 2], 1, 1)
+        cast = Garchcaster(garch=res)
+        assert np.allclose(cast.y_hist, np.asarray(res.model.y)[-2:])
+        assert np.allclose(cast.resids_hist, np.asarray(res.resid)[-2:])
+
+
+@pytest.mark.skipif(not HAS_ARCH, reason='needs the garch extra (arch, pandas)')
+class TestPmdarimaModel:
+    """A fitted ``pmdarima.ARIMA`` is read by duck typing; a stand-in is enough here."""
+    series = np.array([0.4, -1.1, 0.6, 0.2, -0.3])
+
+    class FakeArima:
+        def __init__(self, order, params, series, with_intercept=True, seasonal_order=(0, 0, 0, 0)):
+            self.order, self._params = order, np.asarray(params, dtype=float)
+            self.with_intercept, self.seasonal_order = with_intercept, seasonal_order
+            model = type('Model', (), {'endog': np.asarray(series, dtype=float).reshape(-1, 1)})()
+            self.arima_res_ = type('Res', (), {'model': model})()
+
+        def params(self):
+            return self._params
+
+    @pytest.fixture(scope='class')
+    @staticmethod
+    def garch_res():
+        return TestPathsMatchArch._fit('constant', 1, 1)
+
+    def test_all_coefficients_are_kept(self, garch_res):
+        # constant, three AR, two MA, then the innovation variance
+        arma = self.FakeArima((3, 0, 2), [0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 9.9], self.series)
+        cast = Garchcaster(arma=arma, garch=garch_res)
+        assert cast.order == (3, 2, 1, 1)
+        assert cast.mean.constant == 0.01
+        assert cast.mean.ar_params.tolist() == [0.1, 0.2, 0.3]
+        assert cast.mean.ma_params.tolist() == [0.4, 0.5]
+
+    def test_model_without_intercept(self, garch_res):
+        arma = self.FakeArima((1, 0, 1), [0.1, 0.4, 9.9], self.series, with_intercept=False)
+        cast = Garchcaster(arma=arma, garch=garch_res)
+        assert cast.mean.constant == 0.0
+        assert cast.mean.ar_params.tolist() == [0.1]
+        assert cast.mean.ma_params.tolist() == [0.4]
+
+    def test_ar_history_is_the_series_the_arma_was_fitted_to(self, garch_res):
+        arma = self.FakeArima((2, 0, 2), [0.01, 0.1, 0.2, 0.3, 0.4, 9.9], self.series)
+        cast = Garchcaster(arma=arma, garch=garch_res)
+        assert cast.y_hist.tolist() == [0.2, -0.3]
+        assert np.allclose(cast.resids_hist, np.asarray(garch_res.resid)[-2:])
+
+    def test_differenced_or_seasonal_models_are_rejected(self, garch_res):
+        with pytest.raises(NotImplementedError, match='differenc'):
+            Garchcaster(arma=self.FakeArima((1, 1, 1), [0.0, 0.1, 0.4, 9.9], self.series), garch=garch_res)
+        seasonal = self.FakeArima((1, 0, 1), [0.0, 0.1, 0.4, 9.9], self.series, seasonal_order=(1, 0, 0, 5))
+        with pytest.raises(NotImplementedError, match='seasonal'):
+            Garchcaster(arma=seasonal, garch=garch_res)
