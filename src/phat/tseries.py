@@ -95,6 +95,24 @@ def _is_pmdarima_arima(obj) -> bool:
     return hasattr(obj, 'order') and callable(getattr(obj, 'params', None)) and hasattr(obj, 'arima_res_')
 
 
+def _check_same_end(arima, result) -> None:
+    """
+    The series comes from the ARMA model, the residuals and volatilities from
+    the GARCH model; a forecast needs all three to end on the same observation.
+    """
+    resid = getattr(arima, 'resid', None)
+    if not callable(resid):
+        return
+    arma_resid = np.asarray(resid(), dtype=float).ravel()
+    garch_input = np.asarray(result.model.y, dtype=float).ravel()
+    k = min(5, arma_resid.size, garch_input.size)
+    if k and not np.allclose(arma_resid[-k:], garch_input[-k:], rtol=1e-8, atol=1e-10):
+        raise ValueError(
+            '`garch` must be fitted to the residuals of `arma` up to its last observation: '
+            'the two models do not end on the same observation'
+        )
+
+
 def _pmdarima_mean(arima) -> tuple[np.ndarray, tuple[int, int]]:
     """``(c, phi_1..phi_m, theta_1..theta_n)`` and ``(m, n)`` of a fitted ``pmdarima.ARIMA``."""
     m, d, n = (int(v) for v in arima.order)
@@ -650,6 +668,7 @@ Params:
                 if y is not None:
                     raise ValueError('If `arma` is a fitted model do not provide `y`')
                 y_arr = np.asarray(arma_any.arima_res_.model.endog, dtype=float).ravel()
+                _check_same_end(arma_any, garch_any)
             elif arma is not None:
                 if y is None and self.mean.m > 0:
                     raise ValueError('Provide `y`, the series the ARMA parameters were fitted to')

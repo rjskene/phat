@@ -409,3 +409,14 @@ class TestPmdarimaModel:
         seasonal = self.FakeArima((1, 0, 1), [0.0, 0.1, 0.4, 9.9], self.series, seasonal_order=(1, 0, 0, 5))
         with pytest.raises(NotImplementedError, match='seasonal'):
             Garchcaster(arma=seasonal, garch=garch_res)
+
+    def test_garch_must_be_fitted_to_the_end_of_the_arma_residuals(self, garch_res):
+        # the residual and volatility histories come from `garch`, the series from `arma`;
+        # they have to end on the same observation
+        arma = self.FakeArima((2, 0, 2), [0.01, 0.1, 0.2, 0.3, 0.4, 9.9], self.series)
+        tail = np.asarray(garch_res.model.y, dtype=float)[-5:]
+        arma.resid = lambda: tail
+        Garchcaster(arma=arma, garch=garch_res)                     # aligned: accepted
+        arma.resid = lambda: np.append(tail, [0.7, -0.2])           # two later observations
+        with pytest.raises(ValueError, match='same observation'):
+            Garchcaster(arma=arma, garch=garch_res)

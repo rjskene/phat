@@ -43,6 +43,9 @@ It is not on PyPI yet.
   forecast, not standardized residuals). When both a `pmdarima` and an `arch`
   model are given, the constant of the `arch` model (fitted to the ARMA
   residuals) is still not used; this is now documented.
+  The two models must end on the same observation, since the series comes
+  from one and the residuals and volatilities from the other; a mismatch
+  raises `ValueError`.
 - `Garchcaster` kept `resids[:-maxlag:]` (everything but the last `maxlag`
   values) as its residual history when `use_backcast=False`; it now keeps the
   last `maxlag` residuals. `Garchcaster.dist` is documented to return `None`
