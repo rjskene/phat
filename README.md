@@ -25,6 +25,14 @@ The **phat-tails** package provides the distribution, methods to fit it to a uni
 $ pip install phat-tails
 ```
 
+Version 1.0.0 is not on PyPI yet, so the command above still installs 0.0.11. Until it is, install 1.0.0 from the release tag:
+
+```console
+$ pip install "phat-tails @ git+https://github.com/rjskene/phat@v1.0.0"
+```
+
+Extras work the same way, for example `"phat-tails[all] @ git+https://github.com/rjskene/phat@v1.0.0"`.
+
 The distribution needs Python 3.11 or later, NumPy and SciPy, and nothing else. Optional extras add the rest:
 
 | Extra | Adds | For |
