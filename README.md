@@ -18,6 +18,7 @@ The **phat-tails** package provides the distribution, methods to fit it to a uni
 
 ## Documentation ##
 [![Documentation Status: latest](https://img.shields.io/readthedocs/phat?logo=read-the-docs)](https://phat.readthedocs.io/en/latest)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24569278.svg)](https://doi.org/10.5281/zenodo.24569278)
 
 ## Installation ##
 
@@ -133,6 +134,8 @@ and hold them fixed while the location and scale are fitted.
 The package also provides `ph.Garchcaster`, which simulates forecasts from ARMA and GARCH models with Phat innovations.
 
 ## Citing ##
+
+Each release is archived on Zenodo. Cite the version you used; version 1.0.0 is [10.5281/zenodo.24569279](https://doi.org/10.5281/zenodo.24569279). The DOI [10.5281/zenodo.24569278](https://doi.org/10.5281/zenodo.24569278) covers all versions and resolves to the latest.
 
 Citation metadata is in [CITATION.cff](CITATION.cff); GitHub shows it under "Cite this repository".
 
