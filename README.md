@@ -96,7 +96,7 @@ phat_dist.mean(), phat_dist.std()
 
 The scale `sigma` is 1 here; the standard deviation is 4.9.
 
-Random draws are exact (a component is picked, then its CDF is inverted) and reproducible with `random_state`. `std_rvs` returns draws rescaled to unit variance.
+Random draws are exact (a component is picked, then its CDF is inverted) and reproducible with `random_state`. `std_rvs` returns standardized draws, `(x - mean) / std`.
 
 ```python
 phat_dist.rvs(5, random_state=42)

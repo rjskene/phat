@@ -138,6 +138,13 @@ class TestArrayConstructor:
         assert abs(innovs.std() - 1) < 0.05
         assert abs(innovs.mean() - dist.mean() / dist.std()) < 0.05
 
+    def test_phat_innovations_have_zero_mean_and_unit_variance(self, cast):
+        dist = ph.Phat(0.0, 0.36, 0.24, 0.17)      # heavier left tail: negative mean
+        assert dist.mean() / dist.std() < -0.015
+        innovs = cast._sample_innovs(2000, 500, dist=dist, random_state=1)
+        assert innovs.mean() == pytest.approx(0.0, abs=0.004)
+        assert (innovs ** 2).mean() == pytest.approx(1.0, abs=0.05)
+
     def test_random_state_accepts_generator_and_matches_seed(self, cast):
         a = cast.forecast(random_state=np.random.default_rng(11))
         b = cast.forecast(seed=11)

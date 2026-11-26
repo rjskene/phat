@@ -259,6 +259,17 @@ def test_std_rvs_has_unit_scale():
     assert x.std() == pytest.approx(1.0, abs=0.02)
 
 
+def test_std_rvs_has_zero_mean():
+    # unequal tails and a location: the mean is far from zero in units of the standard deviation
+    dist = ph.Phat(1, 0.36, 0.24, 0.17)
+    assert abs(dist.mean() / dist.std()) > 0.5
+    x = dist.std_rvs(size=400_000, random_state=3)
+    assert x.mean() == pytest.approx(0.0, abs=0.01)
+    assert x.std() == pytest.approx(1.0, abs=0.05)
+    raw = dist.rvs(size=1000, random_state=5)
+    assert np.allclose(dist.std_rvs(size=1000, random_state=5), (raw - dist.mean()) / dist.std())
+
+
 def test_phatstack_rvs_splits_and_regimes():
     p1, p2 = ph.Phat(4, 0.25, 0.3, 0.35), ph.Phat(-2, 0.35, 0.25, 0.45)
     stack = ph.PhatStack(p1, p2, weights=[0.25, 0.75])

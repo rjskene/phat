@@ -578,7 +578,9 @@ Params:
     order: tuple ``(m, n, p, q)``
         Only needed with parameters; inferred from fitted models.
     dist: Phat or scipy rv_frozen class
-        distribution of the innovations; standard Gaussian when ``None``
+        distribution of the innovations; standard Gaussian when ``None``. A
+        Phat is standardized to zero mean and unit variance; a scipy
+        distribution is used as given.
     use_backcast: bool
         Deprecated and without effect. In 0.0.x the default replaced the last
         residuals with a weighted average of the squared residuals at the
@@ -729,9 +731,10 @@ Params:
         Generates innovations according to the provided distribution. If a distribution is not
         provided, default is Gaussian.
 
-        A :class:`~phat.Phat` innovation distribution is sampled with its exact
-        sampler, :meth:`~phat.Phat.std_rvs`, so the innovations have unit
-        variance (this needs both tail shapes below 1/2).
+        A :class:`~phat.Phat` innovation distribution is sampled with
+        :meth:`~phat.Phat.std_rvs`, so the innovations have zero mean and unit
+        variance (this needs both tail shapes below 1/2). A frozen ``scipy.stats``
+        distribution is sampled as it is and must already be standardized.
 
         Params
         -------
@@ -837,8 +840,10 @@ Params:
             number of periods forecast along each path (default: as constructed)
         dist : Phat or frozen scipy.stats distribution, optional
             innovation distribution; standard Gaussian when ``None``. A
-            :class:`~phat.dists.Phat` is sampled with its exact unit-variance
-            sampler :meth:`~phat.dists.Phat.std_rvs`.
+            :class:`~phat.dists.Phat` is sampled with
+            :meth:`~phat.dists.Phat.std_rvs` (zero mean, unit variance). A frozen
+            ``scipy.stats`` distribution is sampled as it is and must already
+            have zero mean and unit variance.
         innovs : array of shape ``(n_paths, horizon)``, optional
             innovations to use instead of drawing them
         random_state : None, int, numpy.random.Generator or RandomState

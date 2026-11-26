@@ -892,11 +892,15 @@ class Phat:
         return _scalar_or_array(x)
 
     def std_rvs(self, *args, **kwargs) -> XTYPE:
-        """Draws divided by the standard deviation, so the sample has unit scale. Requires ``xi < 1/2``."""
+        """
+        Standardized draws ``(X - mean) / std``: zero mean and unit variance, as
+        the innovations of a GARCH model require. Requires both tail shapes
+        below 1/2.
+        """
         sd = self.std()
         if not np.isfinite(sd):
             raise ValueError('standard deviation is infinite: both tail shapes must be below 1/2')
-        return np.asarray(self.rvs(*args, **kwargs)) / sd
+        return (np.asarray(self.rvs(*args, **kwargs)) - self.mean()) / sd
 
     # ---- moments ------------------------------------------------------------
     def mean(self) -> float:

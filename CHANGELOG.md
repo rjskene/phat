@@ -46,6 +46,13 @@ It is not on PyPI yet.
   The two models must end on the same observation, since the series comes
   from one and the residuals and volatilities from the other; a mismatch
   raises `ValueError`.
+- `Phat.std_rvs` divided the draws by the standard deviation without
+  subtracting the mean, so Phat innovations in a `Garchcaster` forecast had a
+  non-zero mean whenever the two tail shapes differed (about -0.02 standard
+  deviations a day for shapes 0.24 and 0.17, some 4% a year of drift on the
+  S&P 500 example). It now returns `(x - mean) / std`. A frozen `scipy.stats`
+  distribution passed as `dist` is still sampled as given; the docstring says
+  it must already be standardized.
 - `Garchcaster` kept `resids[:-maxlag:]` (everything but the last `maxlag`
   values) as its residual history when `use_backcast=False`; it now keeps the
   last `maxlag` residuals. `Garchcaster.dist` is documented to return `None`
