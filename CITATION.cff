@@ -15,6 +15,14 @@ authors:
 version: 1.0.0
 date-released: "2026-11-26"
 license: MIT
+doi: 10.5281/zenodo.24569278
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.24569278
+    description: "All versions (resolves to the latest release)"
+  - type: doi
+    value: 10.5281/zenodo.24569279
+    description: "Version 1.0.0"
 repository-code: "https://github.com/rjskene/phat"
 url: "https://phat.readthedocs.io"
 keywords:
