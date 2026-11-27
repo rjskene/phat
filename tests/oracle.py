@@ -16,17 +16,28 @@ from scipy.integrate import quad
 from scipy.optimize import brentq
 
 
-def _component(xi, mu, sig):
-    w = sp.lambertw((1 + xi) ** 2 / (2 * np.pi)).real
-    s = np.sqrt(w)
-    return dict(xi=xi, mu=mu, sig=sig, s=s, b=sig * (1 + xi) / s, gam=1 + st.norm.cdf(s))
+def _component(xi, mu, sig, s=None):
+    """
+    ``s=None``: the Carreau-Bengio junction ``sqrt(W(z))`` (both pieces share the
+    multiplier ``1 / gam``, so ``lam = 1``). ``s`` given: a free junction at
+    ``mu + s sig``; the generalized Pareto piece then carries its own multiplier
+    ``lam`` and ``b``, ``lam`` follow from continuity of the density and of its
+    slope at the junction.
+    """
+    if s is None:
+        w = sp.lambertw((1 + xi) ** 2 / (2 * np.pi)).real
+        s = np.sqrt(w)
+        lam = 1.0
+    else:
+        lam = (1 + xi) * st.norm.pdf(s) / s
+    return dict(xi=xi, mu=mu, sig=sig, s=s, b=sig * (1 + xi) / s, lam=lam, gam=st.norm.cdf(s) + lam)
 
 
 def pdf_right(x, c):
     a = c["mu"] + c["sig"] * c["s"]
     return np.where(
         x > a,
-        st.genpareto.pdf(x, c["xi"], loc=a, scale=c["b"]),
+        c["lam"] * st.genpareto.pdf(x, c["xi"], loc=a, scale=c["b"]),
         st.norm.pdf(x, c["mu"], c["sig"]),
     ) / c["gam"]
 
@@ -35,7 +46,7 @@ def cdf_right(x, c):
     a = c["mu"] + c["sig"] * c["s"]
     return np.where(
         x > a,
-        st.norm.cdf(a, c["mu"], c["sig"]) + st.genpareto.cdf(x, c["xi"], loc=a, scale=c["b"]),
+        st.norm.cdf(a, c["mu"], c["sig"]) + c["lam"] * st.genpareto.cdf(x, c["xi"], loc=a, scale=c["b"]),
         st.norm.cdf(x, c["mu"], c["sig"]),
     ) / c["gam"]
 
@@ -49,13 +60,13 @@ def cdf_left(x, c):
 
 
 class OraclePhat:
-    """Reference Phat(mu, sig, xi_l, xi_r, p) with quadrature moments and root quantiles."""
+    """Reference Phat(mu, sig, xi_l, xi_r, p[, s_l, s_r]) with quadrature moments and root quantiles."""
 
-    def __init__(self, mu, sig, xi_l, xi_r, p=(0.5, 0.5)):
+    def __init__(self, mu, sig, xi_l, xi_r, p=(0.5, 0.5), s_l=None, s_r=None):
         self.mu, self.sig, self.xi_l, self.xi_r = mu, sig, xi_l, xi_r
         self.p = np.asarray(p, float)
-        self.L = _component(xi_l, mu, sig)
-        self.R = _component(xi_r, mu, sig)
+        self.L = _component(xi_l, mu, sig, s_l)
+        self.R = _component(xi_r, mu, sig, s_r)
         self.a_l = mu - sig * self.L["s"]
         self.a_r = mu + sig * self.R["s"]
 
