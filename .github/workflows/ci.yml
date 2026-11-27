@@ -54,4 +54,4 @@ jobs:
       - run: pip install . pytest
       - run: pip list
       # the distribution, the pure-Python bootstrap and the array-based Garchcaster must work with no extras
-      - run: pytest -p no:cacheprovider tests/test_reference_tables.py tests/test_phat_properties.py tests/test_carben.py tests/test_phatstack.py tests/test_bootstrap.py tests/test_tseries.py tests/test_fit.py tests/test_deprecations.py
+      - run: pytest -p no:cacheprovider tests/test_reference_tables.py tests/test_phat_properties.py tests/test_carben.py tests/test_phatstack.py tests/test_bootstrap.py tests/test_tseries.py tests/test_fit.py tests/test_free_junction.py tests/test_deprecations.py

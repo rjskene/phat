@@ -151,24 +151,43 @@ class CarBenBase:
     * ``sigma``: scale of the Gaussian body. **Not** the standard deviation of the
       hybrid; see :meth:`std`.
 
-    The two remaining GPD parameters are fixed by continuity of the density and
-    its first derivative at the junction ``a``. With ``z = (1 + xi)^2 / (2 pi)``,
-    ``s = sqrt(W(z))`` (``W`` the Lambert W function):
+    The density is ``f / gamma`` on the Gaussian side of the junction ``a`` and
+    ``lam * g / gamma`` on the tail side (``f`` Gaussian, ``g`` generalized
+    Pareto with scale ``b``). Continuity of the density and of its first
+    derivative at ``a = mu + s * sigma`` (right tail; ``mu - s * sigma`` left)
+    give, for any junction distance ``s > 0``,
 
-    * junction          ``a = mu + s * sigma``       (right tail; ``mu - s * sigma`` left)
     * GPD scale         ``b = sigma * (1 + xi) / s``
-    * normaliser        ``gamma = 1 + Phi(s)``
+    * tail multiplier   ``lam = (1 + xi) * phi(s) / s``
+    * normaliser        ``gamma = Phi(s) + lam``
 
     so the Gaussian part carries mass ``Phi(s) / gamma`` and the GPD tail
-    ``1 / gamma``. Instead of ``sigma`` the junction ``a`` may be supplied.
+    ``lam / gamma``.
+
+    **Implied junction** (default; Carreau and Bengio). Both pieces carry the
+    same multiplier, ``lam = 1``. That pins the junction to the tail shape: with
+    ``z = (1 + xi)^2 / (2 pi)`` and ``W`` the Lambert W function,
+    ``s = sqrt(W(z))`` and ``gamma = 1 + Phi(s)``. Give ``sigma``, or the
+    junction ``a`` in its place.
+
+    **Free junction.** Give ``s``, or both ``sigma`` and ``a``, or ``a`` and
+    ``s``. The tail multiplier then follows from ``s`` as above; moving the
+    junction out makes the Gaussian part larger and the tail lighter in mass
+    (not in shape). The hybrid with unequal weights on the two pieces is due to
+    Debbabi, Kratz and El Asmi (2015).
 
     Attributes
     ----------
     body:   frozen ``scipy.stats.norm(mu, sigma)``
     tail:   frozen ``scipy.stats.genpareto`` (for the left tail: of the reflected variable)
-    gamma:  normaliser; the density is (Gaussian or GPD) / gamma
+    gamma:  normaliser
+    lam:    multiplier of the GPD piece relative to the Gaussian piece; ``1`` for
+            the implied junction
     s:      junction distance from ``mu`` in units of ``sigma``
+    junction:   ``'implied'`` or ``'free'``
     """
+
+    _side = 1.0     # +1: tail on the right of ``mu``; -1: on the left
 
     sig = renamed_attribute('sigma')
 
@@ -178,6 +197,8 @@ class CarBenBase:
         mu: float,
         sigma: float | None = None,
         a: float | None = None,
+        *,
+        s: float | None = None,
         ) -> None:
         xi = float(xi)
         if xi <= -1:
@@ -185,16 +206,32 @@ class CarBenBase:
         self.xi = xi
         self.mu = float(mu)
 
-        provided = (sigma is None, a is None)
-        if all(provided) or not any(provided):
-            raise ValueError('Please provide only one of `sigma` or `a`')
-        elif sigma is not None:
+        n_given = sum(v is not None for v in (sigma, a, s))
+        if n_given == 0 or n_given == 3 or (n_given == 1 and s is not None):
+            raise ValueError(
+                'Give `sigma` or `a` alone for the implied junction, '
+                'or two of `sigma`, `a` and `s` for a free junction'
+            )
+        if sigma is not None:
             sigma = float(sigma)
-            if sigma <= 0:
+            if not sigma > 0:
                 raise ValueError('`sigma` must be positive')
+        if s is not None:
+            s = float(s)
+            if not (s > 0 and np.isfinite(s)):
+                raise ValueError('`s` must be positive and finite')
+
+        self.junction = 'implied' if n_given == 1 else 'free'
+        if sigma is not None and a is not None:          # free junction from (sigma, a)
+            s = self._side * (float(a) - self.mu) / sigma
+            if not s > 0:
+                raise ValueError('`a` must lie on the tail side of `mu`')
+        self.s = self.implied_s if s is None else s
+
+        if sigma is not None:
             self.sigma = sigma
             self._given = 'sigma'
-            self.a = self._calc_a()
+            self.a = self._calc_a() if a is None else float(a)
         else:
             assert a is not None
             self.a = float(a)
@@ -203,6 +240,10 @@ class CarBenBase:
             if not self.sigma > 0:
                 raise ValueError('`a` must lie on the tail side of `mu`')
         self.b = self._calc_b_w_sig()
+        # ``lam`` is exactly 1 for the implied junction, so 1.0 results are unchanged
+        self.lam = 1.0
+        if self.junction == 'free':
+            self.lam = (1 + self.xi) * float(scist.norm.pdf(self.s)) / self.s
 
         self.body = scist.norm(self.mu, self.sigma)
 
@@ -224,14 +265,17 @@ class CarBenBase:
         return float(val.real)
 
     @property
-    def s(self) -> float:
-        """Junction distance from ``mu`` in units of ``sigma``: ``sqrt(W(z))``."""
+    def implied_s(self) -> float:
+        """Junction distance at which ``lam = 1`` (Carreau and Bengio): ``sqrt(W(z))``."""
         return float(np.sqrt(self.W_z()))
 
     @property
     def gamma(self) -> float:
-        """Normaliser ``1 + Phi(s)``; equals ``1 + (1 + erf(s / sqrt 2)) / 2``."""
-        return 1.0 + float(scist.norm.cdf(self.s))
+        """
+        Normaliser ``Phi(s) + lam``. For the implied junction this is
+        ``1 + Phi(s) = 1 + (1 + erf(s / sqrt 2)) / 2``.
+        """
+        return self.lam + float(scist.norm.cdf(self.s))
 
     @property
     def body_mass(self) -> float:
@@ -240,16 +284,16 @@ class CarBenBase:
 
     @property
     def tail_mass(self) -> float:
-        """Probability carried by the GPD part, ``1 / gamma``."""
-        return 1.0 / self.gamma
+        """Probability carried by the GPD part, ``lam / gamma`` (``1 / gamma`` for the implied junction)."""
+        return self.lam / self.gamma
 
     def _calc_b_w_sig(self) -> float:
-        """Equation 7 in Carreau and Bengio: ``b = sigma (1 + xi) / sqrt(W(z))``."""
+        """``b = sigma (1 + xi) / s``; with the implied junction, equation 7 in Carreau and Bengio."""
         return self.sigma * (1 + self.xi) / self.s
 
     def _calc_b_w_a(self) -> float:
-        """``b`` from the junction: ``sigma = |a - mu| / s`` so ``b = (1 + xi) |a - mu| / W(z)``."""
-        return (1 + self.xi) * abs(self.a - self.mu) / self.W_z()
+        """``b`` from the junction: ``sigma = |a - mu| / s`` so ``b = (1 + xi) |a - mu| / s^2``."""
+        return (1 + self.xi) * abs(self.a - self.mu) / self.s ** 2
 
     # ---- defined by the right/left subclasses ----------------------------------
     def _calc_a(self) -> float:
@@ -302,20 +346,25 @@ class CarBenRight(CarBenBase):
     Right-tailed CarBen hybrid: Gaussian for ``x <= a``, generalized Pareto for ``x > a``.
     """
 
+    _side = 1.0
+
     @renamed_kwargs(sig='sigma')
     def __init__(self,
         xi: float,
         mu: float,
         sigma: float | None = None,
         a: float | None = None,
+        *,
+        s: float | None = None,
         ) -> None:
-        super().__init__(xi, mu, sigma, a)
+        super().__init__(xi, mu, sigma, a, s=s)
         self._tail = scist.genpareto(self.xi, loc=self.a, scale=self.b)
         self._phi_s = float(scist.norm.cdf(self.s))
         self._log_gamma = float(np.log(self.gamma))
+        self._log_lam = float(np.log(self.lam))
 
     def _calc_a(self) -> float:
-        """Equation 8 in Carreau and Bengio: ``a = mu + sigma sqrt(W(z))``."""
+        """``a = mu + sigma s``; with the implied junction, equation 8 in Carreau and Bengio."""
         return self.mu + self.sigma * self.s
 
     def _calc_sigma(self) -> float:
@@ -324,24 +373,26 @@ class CarBenRight(CarBenBase):
     # ---- distribution functions ---------------------------------------------
     def pdf(self, x: XTYPE) -> np.ndarray:
         x = _as_float_array(x)
-        out = np.where(x > self.a, self.tail.pdf(x), self.body.pdf(x)) / self.gamma
+        out = np.where(x > self.a, self.lam * self.tail.pdf(x), self.body.pdf(x)) / self.gamma
         return _scalar_or_array(out)
 
     def logpdf(self, x: XTYPE) -> np.ndarray:
         x = _as_float_array(x)
         with np.errstate(divide='ignore', invalid='ignore'):
-            out = np.where(x > self.a, self.tail.logpdf(x), self.body.logpdf(x)) - self._log_gamma
+            tail = self._log_lam + self.tail.logpdf(x)
+            out = np.where(x > self.a, tail, self.body.logpdf(x)) - self._log_gamma
         return _scalar_or_array(out)
 
     def cdf(self, x: XTYPE) -> np.ndarray:
         x = _as_float_array(x)
-        out = np.where(x > self.a, self._phi_s + self.tail.cdf(x), self.body.cdf(x)) / self.gamma
+        out = np.where(x > self.a, self._phi_s + self.lam * self.tail.cdf(x), self.body.cdf(x)) / self.gamma
         return _scalar_or_array(out)
 
     def sf(self, x: XTYPE) -> np.ndarray:
         """Survival function ``P(X > x)``, computed without ``1 - cdf`` so the far tail keeps precision."""
         x = _as_float_array(x)
-        out = np.where(x > self.a, self.tail.sf(x), 1.0 + self._phi_s - self.body.cdf(x)) / self.gamma
+        body = self.lam + self._phi_s - self.body.cdf(x)
+        out = np.where(x > self.a, self.lam * self.tail.sf(x), body) / self.gamma
         return _scalar_or_array(out)
 
     def logcdf(self, x: XTYPE) -> np.ndarray:
@@ -349,7 +400,7 @@ class CarBenRight(CarBenBase):
         with np.errstate(divide='ignore', invalid='ignore'):
             out = np.where(
                 x > self.a,
-                np.log(self._phi_s + self.tail.cdf(x)),
+                np.log(self._phi_s + self.lam * self.tail.cdf(x)),
                 self.body.logcdf(x),
             ) - self._log_gamma
         return _scalar_or_array(out)
@@ -359,15 +410,15 @@ class CarBenRight(CarBenBase):
         with np.errstate(divide='ignore', invalid='ignore'):
             out = np.where(
                 x > self.a,
-                self.tail.logsf(x),
-                np.log1p(self._phi_s - self.body.cdf(x)),
+                self._log_lam + self.tail.logsf(x),
+                np.log1p((self.lam - 1.0) + self._phi_s - self.body.cdf(x)),
             ) - self._log_gamma
         return _scalar_or_array(out)
 
     @property
     def qjunc(self) -> float:
-        """CDF at the junction ``a``: ``1 - 1 / gamma``."""
-        return 1 - 1 / self.gamma
+        """CDF at the junction ``a``: ``1 - lam / gamma`` (``1 - 1 / gamma`` for the implied junction)."""
+        return 1 - self.tail_mass
 
     def ppf(self, q: XTYPE) -> np.ndarray:
         """Quantile function. Uses the GPD ``isf`` above the junction so that ``q`` near 1 stays precise."""
@@ -375,7 +426,7 @@ class CarBenRight(CarBenBase):
         with np.errstate(invalid='ignore'):
             out = np.where(
                 q > self.qjunc,
-                self.tail.isf(self.gamma * (1.0 - q)),
+                self.tail.isf(self.gamma * (1.0 - q) / self.lam),
                 self.body.ppf(self.gamma * q),
             )
         return _scalar_or_array(out)
@@ -386,8 +437,8 @@ class CarBenRight(CarBenBase):
         with np.errstate(invalid='ignore'):
             out = np.where(
                 p < self.tail_mass,
-                self.tail.isf(self.gamma * p),
-                # body.isf(gamma*p - Phi(s)) rewritten so p = 1 gives exactly -inf
+                self.tail.isf(self.gamma * p / self.lam),
+                # body.isf(gamma*p - lam) rewritten so p = 1 gives exactly -inf
                 self.body.ppf(self.gamma * (1.0 - p)),
             )
         return _scalar_or_array(out)
@@ -456,12 +507,14 @@ class CarBenRight(CarBenBase):
     def lower_partial_mean(self, t: XTYPE) -> np.ndarray:
         """``int_{-inf}^{t} x f(x) dx``."""
         t = _as_float_array(t)
-        return _scalar_or_array((self._gauss_lower_partial(t) + self._gpd_lower_partial(t)) / self.gamma)
+        total = self._gauss_lower_partial(t) + self.lam * self._gpd_lower_partial(t)
+        return _scalar_or_array(total / self.gamma)
 
     def upper_partial_mean(self, t: XTYPE) -> np.ndarray:
         """``int_{t}^{inf} x f(x) dx``; ``inf`` for ``xi >= 1``."""
         t = _as_float_array(t)
-        return _scalar_or_array((self._gauss_upper_partial(t) + self._gpd_upper_partial(t)) / self.gamma)
+        total = self._gauss_upper_partial(t) + self.lam * self._gpd_upper_partial(t)
+        return _scalar_or_array(total / self.gamma)
 
 
 class CarBenLeft(CarBenBase):
@@ -473,21 +526,26 @@ class CarBenLeft(CarBenBase):
     two sides cannot drift apart.
     """
 
+    _side = -1.0
+
     @renamed_kwargs(sig='sigma')
     def __init__(self,
         xi: float,
         mu: float,
         sigma: float | None = None,
         a: float | None = None,
+        *,
+        s: float | None = None,
         ) -> None:
-        super().__init__(xi, mu, sigma, a)
-        self._mirror = CarBenRight(self.xi, self.mu, sigma=self.sigma)
+        super().__init__(xi, mu, sigma, a, s=s)
+        self._mirror = CarBenRight(
+            self.xi, self.mu, sigma=self.sigma, s=self.s if self.junction == 'free' else None)
         # Tail of the reflected variable -x, kept for backwards compatibility:
         # ``tail.pdf(-x)`` is the GPD density of the left tail at ``x``.
         self._tail = scist.genpareto(self.xi, loc=-self.a, scale=self.b)
 
     def _calc_a(self) -> float:
-        """Equation 8 with the sign of the second term flipped: ``a = mu - sigma sqrt(W(z))``."""
+        """``a = mu - sigma s``: equation 8 in Carreau and Bengio with the sign of the second term flipped."""
         return self.mu - self.sigma * self.s
 
     def _calc_sigma(self) -> float:
@@ -516,8 +574,8 @@ class CarBenLeft(CarBenBase):
 
     @property
     def qjunc(self) -> float:
-        """CDF at the junction ``a``: ``1 / gamma``."""
-        return 1 / self.gamma
+        """CDF at the junction ``a``: ``lam / gamma`` (``1 / gamma`` for the implied junction)."""
+        return self.tail_mass
 
     def ppf(self, q: XTYPE) -> np.ndarray:
         return _scalar_or_array(2.0 * self.mu - self._mirror.isf(q))
@@ -560,6 +618,8 @@ class CarBenHybrid:
     sigma:  scale of the Gaussian body (or give the junction ``a`` instead)
     a:      junction between body and tail
     tail:   ``'right'`` (default) or ``'left'``
+    s:      junction distance from ``mu`` in units of ``sigma``, for a free
+            junction (see :class:`CarBenBase`). Default: implied by ``xi``.
 
     .. versionchanged:: 0.1
        ``xi`` is always the tail shape. In 0.0.x a negative ``xi`` meant "left
@@ -581,6 +641,7 @@ class CarBenHybrid:
         a: float | None = None,
         tail: str = _UNSET,
         *,
+        s: float | None = None,
         rtail: bool = _UNSET,
         ) -> Any:
         xi = float(xi)
@@ -614,7 +675,7 @@ class CarBenHybrid:
         if tail not in ('left', 'right'):
             raise ValueError("`tail` must be 'left' or 'right'")
 
-        return CarBenRight(xi, mu, sigma, a) if tail == 'right' else CarBenLeft(xi, mu, sigma, a)
+        return CarBenRight(xi, mu, sigma, a, s=s) if tail == 'right' else CarBenLeft(xi, mu, sigma, a, s=s)
 
 
 class Phat:
@@ -636,6 +697,12 @@ class Phat:
                 shape describes its own side: a fat left tail has ``xi_left > 0``.
     weights:    mixture weights ``(p_l, p_r)``, non-negative and summing to 1.
                 Default ``(0.5, 0.5)``.
+    s_left:     distance of the left junction from ``mu`` in units of ``sigma``.
+                Default ``None``: the junction implied by ``xi_left``.
+    s_right:    the same for the right junction.
+
+    .. versionadded:: 1.1
+       ``s_left`` and ``s_right``, the free junction.
 
     .. deprecated:: 0.1
        The 0.0.x names ``sig``, ``xi_l``, ``xi_r`` and ``p`` still work as
@@ -649,11 +716,28 @@ class Phat:
     Notes
     -----
     Density ``f = p_l f_L(x; xi_left) + p_r f_R(x; xi_right)``; the CDF is the same
-    weighted sum. The body between the two junctions ``a_left < a_right`` is Gaussian,
-    but it carries only 18-28% of the mass for ``xi`` between 0 and 1 (see
-    :attr:`body_mass`); outside a junction the density is a GPD tail plus the
-    Gaussian remnant of the other component. At ``xi_left = xi_right = 0`` the tails are
-    exponential, so Phat is not Gaussian.
+    weighted sum. The body between the two junctions ``a_left < a_right`` is Gaussian;
+    outside a junction the density is a GPD tail plus the Gaussian remnant of the
+    other component.
+
+    **Implied junction** (the default, and the only form before 1.1). Within each
+    component the Gaussian and the Pareto piece carry the same multiplier, which
+    pins each junction to its tail shape, less than one ``sigma`` from ``mu``.
+    The Gaussian body then carries only 18-28% of the mass for ``xi`` between 0
+    and 1 (see :attr:`body_mass`), and at ``xi_left = xi_right = 0`` the tails are
+    exponential, so Phat is not Gaussian. The tail shape has to describe the
+    shoulders of the data as well as the extremes.
+
+    **Free junction.** With ``s_left`` / ``s_right`` given, the junction sits at
+    ``mu - s_left * sigma`` / ``mu + s_right * sigma`` and the Pareto piece of
+    that component carries the multiplier ``lam = (1 + xi) phi(s) / s`` relative
+    to its Gaussian piece (:attr:`lam_left`, :attr:`lam_right`); the density
+    stays continuously differentiable. A junction further out gives a larger
+    Gaussian body and less mass, not a different shape, in the tail; as ``s``
+    grows the distribution tends to the Gaussian. ``lam = 1`` is the implied
+    junction. :meth:`fit` can estimate the junction distances
+    (``junction='free'`` or ``'symmetric'``). The one-tailed hybrid with unequal
+    weights is due to Debbabi, Kratz and El Asmi (2015).
 
     With a negative shape the GPD tail of that component ends at
     ``a_right + b_right / |xi_right|`` (``a_left - b_left / |xi_left|`` on the
@@ -690,6 +774,9 @@ class Phat:
         xi_left: float,
         xi_right: float,
         weights: Iterable[float] | None = None,
+        *,
+        s_left: float | None = None,
+        s_right: float | None = None,
         ) -> None:
         mu, sigma, xi_left, xi_right = (float(v) for v in (mu, sigma, xi_left, xi_right))
         if not sigma > 0:
@@ -701,8 +788,8 @@ class Phat:
         self.xi_left = xi_left
         self.xi_right = xi_right
 
-        self.left = CarBenLeft(xi_left, mu, sigma)
-        self.right = CarBenRight(xi_right, mu, sigma)
+        self.left = CarBenLeft(xi_left, mu, sigma, s=s_left)
+        self.right = CarBenRight(xi_right, mu, sigma, s=s_right)
 
         w = np.array([.5, .5]) if weights is None else np.asarray(weights, dtype=float)
         if w.shape != (2,) or np.any(w < 0) or not np.isclose(w.sum(), 1.0, rtol=0, atol=1e-12):
@@ -730,6 +817,31 @@ class Phat:
     def junctions(self) -> tuple:
         """``(a_left, a_right)``: the points where the Gaussian body meets each GPD tail."""
         return self.left.a, self.right.a
+
+    @property
+    def junction(self) -> tuple:
+        """``('implied' | 'free', 'implied' | 'free')`` for the left and the right junction."""
+        return self.left.junction, self.right.junction
+
+    @property
+    def s_left(self) -> float:
+        """Distance of the left junction from ``mu`` in units of ``sigma``."""
+        return self.left.s
+
+    @property
+    def s_right(self) -> float:
+        """Distance of the right junction from ``mu`` in units of ``sigma``."""
+        return self.right.s
+
+    @property
+    def lam_left(self) -> float:
+        """Multiplier of the left Pareto piece relative to its Gaussian piece; 1 for the implied junction."""
+        return self.left.lam
+
+    @property
+    def lam_right(self) -> float:
+        """Multiplier of the right Pareto piece relative to its Gaussian piece; 1 for the implied junction."""
+        return self.right.lam
 
     @property
     def body_mass(self) -> float:
@@ -954,19 +1066,29 @@ class Phat:
         weights: Sequence[float] | None = None,
         *,
         backend: str = 'scipy',
+        junction: str = 'implied',
+        s_left: float | None = None,
+        s_right: float | None = None,
         **kwargs: Any,
         ) -> Any:
         """
         Maximum-likelihood fit.
 
-        With ``xi_left`` and ``xi_right`` given only ``(mu, sigma)`` are estimated (the
+        With ``xi_left`` and ``xi_right`` given the tail shapes are held fixed (the
         two-stage estimator: tail shapes from
-        :func:`~phat.bootstrap.two_tailed_hill_double_bootstrap`, body by
-        likelihood); otherwise all four parameters are. ``weights`` fixes the mixture
-        weights (default ``(0.5, 0.5)``). Both variants report standard errors.
+        :func:`~phat.bootstrap.two_tailed_hill_double_bootstrap`, the rest by
+        likelihood); otherwise they are estimated. ``weights`` fixes the mixture
+        weights (default ``(0.5, 0.5)``). Every variant reports standard errors.
 
         Parameters
         ----------
+        junction:   ``'implied'`` (default): each junction follows from its tail
+                    shape, as in 1.0. ``'free'``: the junction distances ``s_left``
+                    and ``s_right`` are estimated too. ``'symmetric'``: one
+                    distance ``s`` for both sides is estimated. See
+                    :func:`phat.fit.fit_phat`.
+        s_left, s_right: junction distances to hold fixed (both, in units of
+                    ``sigma`` from ``mu``)
         backend:    ``'scipy'`` (default; NumPy + SciPy only) returns a
                     :class:`phat.fit.PhatFitResult`; ``'statsmodels'`` returns the
                     ``statsmodels`` results object of :class:`phat.fit.PhatFit`
@@ -975,10 +1097,13 @@ class Phat:
         """
         if backend == 'scipy':
             from phat.fit import fit_phat
-            return fit_phat(values, xi_left, xi_right, weights=weights, **kwargs)
+            return fit_phat(values, xi_left, xi_right, weights=weights,
+                            junction=junction, s_left=s_left, s_right=s_right, **kwargs)
         if backend == 'statsmodels':
             if weights is not None:
                 raise ValueError('the statsmodels backend does not take `weights`')
+            if junction != 'implied' or s_left is not None or s_right is not None:
+                raise ValueError('the statsmodels backend fits the implied junction only')
             from phat.fit import _statsmodels_phatfit
             x = np.asarray(values, dtype=float)
             exog = np.ones((x.size, 1))  # constant column; the model has no covariates

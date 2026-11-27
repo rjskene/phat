@@ -27,7 +27,11 @@ from phat.dists import Phat
 __all__ = ['PhatFitResult', 'fit_phat', 'PhatFit']  # noqa: F822  # PhatFit via __getattr__
 
 PARAM_NAMES = ('mu', 'sigma', 'xi_left', 'xi_right')
+JUNCTION_NAMES = ('s_left', 's_right')
+JUNCTIONS = ('implied', 'free', 'symmetric')
 _XI_MAX = 10.0
+_S_MIN, _S_MAX = 0.05, 5.0
+_S_STARTS = (0.6, 1.0, 1.6)
 _BOUND_TOL = 1e-8
 
 
@@ -39,7 +43,9 @@ class PhatFitResult:
     Attributes
     ----------
     params:     estimates of the free parameters, in :attr:`names` order
-    names:      names of the free parameters (``mu``, ``sigma`` and, unless fixed, ``xi_left``, ``xi_right``)
+    names:      names of the free parameters: ``mu``, ``sigma``; unless fixed, ``xi_left``,
+                ``xi_right``; and for an estimated junction ``s_left``, ``s_right``
+                (``junction='free'``) or ``s`` (``junction='symmetric'``)
     bse:        standard errors (square roots of the diagonal of :attr:`cov`); ``nan``
                 for an estimate that sits on a bound (see :attr:`at_bound`) and where
                 the observed information is not invertible
@@ -47,7 +53,10 @@ class PhatFitResult:
                 bound; ``nan`` in the rows and columns of those that are
     llf:        log-likelihood at the optimum
     nobs:       number of observations
-    fixed:      parameters held fixed during the fit (``xi_left``, ``xi_right`` and ``weights``)
+    fixed:      parameters held fixed during the fit (``xi_left``, ``xi_right``, ``weights``,
+                ``s_left``, ``s_right``)
+    junction:   ``'implied'`` (junctions follow from the tail shapes, or were given),
+                ``'free'`` or ``'symmetric'`` (junction distances estimated)
     converged:  whether the optimiser reported success
     message:    the optimiser's message
     at_bound:   names of the estimates that sit on a bound of the search, typically a
@@ -65,6 +74,7 @@ class PhatFitResult:
     converged: bool = True
     message: str = ''
     at_bound: tuple[str, ...] = ()
+    junction: str = 'implied'
 
     @property
     def params_dict(self) -> dict[str, float]:
@@ -73,12 +83,18 @@ class PhatFitResult:
 
     @property
     def all_params(self) -> dict[str, float]:
-        """``mu, sigma, xi_left, xi_right`` with fixed values filled in."""
+        """
+        ``mu, sigma, xi_left, xi_right`` with fixed values filled in, followed by
+        ``s_left, s_right`` when the junctions were estimated or given (they are
+        absent for the implied junction).
+        """
         out = dict(self.params_dict)
-        for name in ('xi_left', 'xi_right'):
+        for name in PARAM_NAMES[2:] + JUNCTION_NAMES:
             if name in self.fixed:
                 out[name] = float(self.fixed[name])
-        return {name: out[name] for name in PARAM_NAMES}
+        if 's' in out:
+            out['s_left'] = out['s_right'] = out.pop('s')
+        return {name: out[name] for name in PARAM_NAMES + JUNCTION_NAMES if name in out}
 
     @property
     def dist(self) -> Phat:
@@ -113,6 +129,13 @@ class PhatFitResult:
 
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         return self.summary()
+
+
+def _unit_iqr(xi_left: float, xi_right: float, s: float, weights: Sequence[float] | None) -> float:
+    """Interquartile range of ``Phat(0, 1, xi_left, xi_right)`` with both junctions at distance ``s``."""
+    dist = Phat(0.0, 1.0, xi_left, xi_right, weights=weights, s_left=s, s_right=s)
+    q1, q3 = dist.ppf(np.array([0.25, 0.75]))
+    return float(q3 - q1)
 
 
 def _start_values(x: np.ndarray, free_tails: bool) -> np.ndarray:
@@ -154,6 +177,10 @@ def fit_phat(
     xi_right: float | None = None,
     weights: Sequence[float] | None = None,
     start: Sequence[float] | None = None,
+    *,
+    junction: str = 'implied',
+    s_left: float | None = None,
+    s_right: float | None = None,
     **minimize_kwargs: Any,
 ) -> PhatFitResult:
     """
@@ -163,25 +190,69 @@ def fit_phat(
     ----------
     values:     observations
     xi_left, xi_right: tail shapes to hold fixed. Give both for the two-stage estimator
-                (shapes from the Hill double bootstrap, then ``mu`` and ``sigma`` by
-                likelihood); give neither for the full four-parameter fit.
+                (shapes from the Hill double bootstrap, then the rest by likelihood);
+                give neither to estimate them.
     weights:    mixture weights to hold fixed (default ``(0.5, 0.5)``)
-    start:      starting values for the free parameters; see :func:`_start_values`
+    start:      starting values for the free parameters, in the order of
+                :attr:`PhatFitResult.names`; see :func:`_start_values`. With an
+                estimated junction and no ``start``, the search is run from
+                several starting junction distances and the best optimum is kept.
+    junction:   how the junctions between the Gaussian body and the two tails are set.
+
+                * ``'implied'`` (default): by the tail shapes, as in 1.0.
+                * ``'free'``: one junction distance per side, ``s_left`` and
+                  ``s_right`` (in units of ``sigma`` from ``mu``), estimated with the
+                  other parameters.
+                * ``'symmetric'``: one distance ``s`` for both sides, estimated.
+    s_left, s_right: junction distances to hold fixed (give both, with
+                ``junction='implied'``).
     **minimize_kwargs:  forwarded to ``scipy.optimize.minimize`` (default method
-                ``L-BFGS-B`` with ``sigma > 0`` and ``0 <= xi <= 10``)
+                ``L-BFGS-B`` with ``sigma > 0``, ``0 <= xi <= 10`` and
+                ``0.05 <= s <= 5``)
+
+    Notes
+    -----
+    The implied junction is the special case ``lam = 1`` of the free one, so the
+    two fits are nested and twice the difference of their log-likelihoods can be
+    referred to a chi-squared distribution (two degrees of freedom for
+    ``'free'``; ``'symmetric'`` nests the implied junction only when the two
+    tail shapes are equal). As a junction moves far out its tail holds few
+    observations and the tail shape on that side becomes poorly determined; an
+    estimate that ends on the upper bound of ``s`` says the data do not ask for
+    a Pareto tail on that side.
+
+    .. versionadded:: 1.1
+       ``junction``, ``s_left`` and ``s_right``.
     """
     x = np.asarray(values, dtype=float).ravel()
     if x.size < 3:
         raise ValueError('need at least three observations')
     if (xi_left is None) != (xi_right is None):
         raise ValueError('fix both tail shapes or neither')
+    if junction not in JUNCTIONS:
+        raise ValueError(f'`junction` must be one of {JUNCTIONS}, not {junction!r}')
+    if (s_left is None) != (s_right is None):
+        raise ValueError('fix both junction distances or neither')
+    given_s = s_left is not None
+    if given_s and junction != 'implied':
+        raise ValueError("`s_left` and `s_right` fix the junctions; do not combine them with `junction`")
     free_tails = xi_left is None
+    n_tail = 2 if free_tails else 0
+    n_s = {'implied': 0, 'free': 2, 'symmetric': 1}[junction]
 
     def unpack(theta: np.ndarray) -> Phat:
         if free_tails:
-            return Phat(theta[0], theta[1], theta[2], theta[3], weights=weights)
-        assert xi_left is not None and xi_right is not None
-        return Phat(theta[0], theta[1], float(xi_left), float(xi_right), weights=weights)
+            xl, xr = theta[2], theta[3]
+        else:
+            assert xi_left is not None and xi_right is not None
+            xl, xr = float(xi_left), float(xi_right)
+        if n_s == 2:
+            sl, sr = theta[2 + n_tail], theta[3 + n_tail]
+        elif n_s == 1:
+            sl = sr = theta[2 + n_tail]
+        else:
+            sl, sr = s_left, s_right
+        return Phat(theta[0], theta[1], xl, xr, weights=weights, s_left=sl, s_right=sr)
 
     def nll(theta: np.ndarray) -> float:
         try:
@@ -190,14 +261,27 @@ def fit_phat(
             return np.inf
         return value if np.isfinite(value) else np.inf
 
-    theta0 = _start_values(x, free_tails) if start is None else np.asarray(start, dtype=float)
-    bounds = [(None, None), (1e-12, None)] + ([(0.0, _XI_MAX)] * 2 if free_tails else [])
+    bounds = [(None, None), (1e-12, None)] + [(0.0, _XI_MAX)] * n_tail + [(_S_MIN, _S_MAX)] * n_s
     kwargs: dict[str, Any] = {'method': 'L-BFGS-B', 'bounds': bounds}
     kwargs.update(minimize_kwargs)
-    res = opt.minimize(nll, theta0, **kwargs)
+
+    if start is not None:
+        starts = [np.asarray(start, dtype=float)]
+    elif n_s == 0:
+        starts = [_start_values(x, free_tails)]
+    else:
+        # A fitted junction changes how much of the spread the Gaussian scale has to
+        # carry, so each starting distance gets the scale that matches the data's IQR.
+        q1, med, q3 = np.percentile(x, [25, 50, 75])
+        xl0, xr0 = (0.2, 0.2) if free_tails else (float(xi_left), float(xi_right))  # type: ignore[arg-type]
+        starts = []
+        for s0 in _S_STARTS:
+            sig0 = max((q3 - q1) / _unit_iqr(xl0, xr0, s0, weights), 1e-6 * (abs(med) + 1))
+            starts.append(np.array([med, sig0] + [xl0, xr0][:n_tail] + [s0] * n_s, dtype=float))
+    res = min((opt.minimize(nll, theta0, **kwargs) for theta0 in starts), key=lambda r: r.fun)
 
     theta = np.asarray(res.x, dtype=float)
-    names = PARAM_NAMES if free_tails else PARAM_NAMES[:2]
+    names = PARAM_NAMES[:2 + n_tail] + {0: (), 1: ('s',), 2: JUNCTION_NAMES}[n_s]
 
     # An estimate on a bound has no Wald standard error. The observed information
     # is taken over the remaining parameters, with the bound ones held there.
@@ -226,12 +310,15 @@ def fit_phat(
     fixed: dict[str, Any] = {}
     if not free_tails:
         fixed['xi_left'], fixed['xi_right'] = float(xi_left), float(xi_right)  # type: ignore[arg-type]
+    if given_s:
+        fixed['s_left'], fixed['s_right'] = float(s_left), float(s_right)  # type: ignore[arg-type]
     if weights is not None:
         fixed['weights'] = tuple(float(v) for v in weights)
     return PhatFitResult(
         params=theta, names=names, bse=bse, cov=cov, llf=-float(res.fun), nobs=int(x.size),
         fixed=fixed, converged=bool(res.success), message=str(res.message),
         at_bound=tuple(name for name, hit in zip(names, on_bound) if hit),
+        junction=junction,
     )
 
 

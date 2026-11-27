@@ -5,6 +5,56 @@ All notable changes to `phat-tails` are recorded here. The format follows
 behaviour is listed, because numbers printed in the old README and notebooks
 change.
 
+## [Unreleased]
+
+To be released as 1.1.0. Nothing changes for existing code: every default
+gives the 1.0.0 result, and the full 1.0.0 test suite passes unchanged.
+
+### Added
+- **A free junction.** In 1.0.0 the junction between the Gaussian body and a
+  generalized Pareto tail is implied by the tail shape, because both pieces of
+  a hybrid Pareto component carry the same multiplier `1 / gamma`. The Pareto
+  piece may now carry its own multiplier `lam`. Continuity of the density and
+  of its slope at a junction `s` body scales from the centre give
+  `b = sigma (1 + xi) / s`, `lam = (1 + xi) phi(s) / s` and
+  `gamma = Phi(s) + lam`; `lam = 1` is the implied junction. The density stays
+  continuously differentiable. The one-tailed hybrid with unequal weights is
+  that of Debbabi, Kratz and El Asmi (2015).
+  - `Phat(mu, sigma, xi_left, xi_right, s_left=..., s_right=...)`. Either
+    distance may be left out, which keeps the implied junction on that side.
+    New read-only attributes `s_left`, `s_right`, `lam_left`, `lam_right` and
+    `junction` (`'implied'` or `'free'` per side).
+  - `CarBenRight`, `CarBenLeft` and `CarBenHybrid` take `s=...`; giving both
+    `sigma` and `a`, or `a` and `s`, also defines a free junction. New
+    attributes `lam`, `junction` and `implied_s`.
+  - All distribution functions, quantiles, random draws, moments and expected
+    shortfall hold for a free junction and are tested against an independent
+    implementation and quadrature.
+- **Junction estimation in `Phat.fit` / `fit_phat`.** `junction='free'`
+  estimates `s_left` and `s_right` with the other parameters;
+  `junction='symmetric'` estimates one distance `s` for both sides;
+  `s_left=..., s_right=...` holds given distances fixed. All combine with fixed
+  tail shapes (the two-stage estimator). The search is bounded to
+  `0.05 <= s <= 5` and, when no `start` is given, run from three starting
+  distances. `PhatFitResult` gains `junction`; `all_params` and `dist` carry
+  the junction distances when they were estimated or given.
+
+### Changed
+- `CarBenRight(xi, mu, sigma, a)` with **both** `sigma` and `a` used to raise
+  `ValueError`; it now builds the hybrid with a free junction at `a`. Giving
+  neither, or `s` alone, or all three still raises.
+- `CarBenBase.s` is an attribute instead of a property. Its value for the
+  implied junction is unchanged.
+- The `statsmodels` backend of `Phat.fit` fits the implied junction only and
+  raises `ValueError` when asked for anything else.
+
+### Documentation
+- `thephat` notebook: new section "A Free Junction" with the derivation in the
+  notebook's notation; step 4 now states `z = (1 + xi)^2 / (2 pi)`, which was
+  missing.
+- `mle_fit` notebook: new section "Estimating the junction" on S&P 500 returns.
+- README and references: the free junction and its sources.
+
 ## [1.0.0] - 2026-11-26
 
 The first release since 0.0.11. It is a breaking release: numbers change

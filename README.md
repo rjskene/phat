@@ -14,6 +14,8 @@ The distribution has 4 parameters:
 
 Phat does not contain the Gaussian distribution: with both shapes at 0 the tails are exponential.
 
+That describes the default, in which each junction is implied by its tail shape (Carreau and Bengio's construction). From version 1.1 the junctions can also be free: `s_left` and `s_right` place them any distance from the centre, in units of `sigma`, and the weight of each Pareto tail follows from the same smoothness conditions. A junction further out gives a wider Gaussian centre and a tail that starts later and weighs less, with the same shape. The one-tailed hybrid with a free junction is due to [Debbabi, Kratz and El Asmi (2015)](https://doi.org/10.1109/COMNET.2015.7566619).
+
 The **phat-tails** package provides the distribution, methods to fit it to a univariate dataset, and a simulator for ARMA-GARCH forecasts with Phat innovations.
 
 ## Documentation ##
@@ -130,6 +132,17 @@ xi_left, xi_right = ph.two_tailed_hill_double_bootstrap(x)
 ```
 
 and hold them fixed while the location and scale are fitted.
+
+The junctions can be estimated as well:
+
+```python
+res = ph.Phat.fit(x, junction='symmetric')           # one junction distance for both sides
+res = ph.Phat.fit(x, junction='free')                # one per side
+res = ph.Phat.fit(x, xi_left, xi_right, junction='free')   # two-stage, junctions fitted
+res.dist.s_left, res.dist.s_right                    # junction distances, in units of sigma
+```
+
+With the implied junction a tail shape also fixes where its tail starts and how much probability it holds, so it has to describe the shoulders of the data as well as the extremes. On S&P 500 daily returns since 1950, estimating one junction distance raises the log-likelihood by about 290 and brings the tail shapes off the zero bound; see the [fitting notebook](https://phat.readthedocs.io/en/latest/notebooks/mle_fit.html).
 
 The package also provides `ph.Garchcaster`, which simulates forecasts from ARMA and GARCH models with Phat innovations.
 
