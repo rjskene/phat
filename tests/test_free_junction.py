@@ -273,7 +273,7 @@ def sample():
 
 @pytest.fixture(scope='module')
 def free_fit(sample):
-    return ph.Phat.fit(sample, junction='free')
+    return ph.Phat.fit(sample, junction='free', per_side=True)
 
 
 @pytest.fixture(scope='module')
@@ -283,6 +283,7 @@ def implied_fit(sample):
 
 def test_free_fit_recovers_the_junctions(free_fit):
     assert free_fit.names == ('mu', 'sigma', 'xi_left', 'xi_right', 's_left', 's_right')
+    assert free_fit.junction == 'free' and free_fit.per_side is True
     assert free_fit.converged
     tol = dict(mu=0.05, sigma=0.05, xi_left=0.06, xi_right=0.06, s_left=0.15, s_right=0.15)
     for name, truth in TRUE.items():
@@ -312,13 +313,14 @@ def test_free_junction_beats_the_implied_one_on_free_junction_data(free_fit, imp
     assert implied_fit.names == ('mu', 'sigma', 'xi_left', 'xi_right')
     assert set(implied_fit.all_params) == {'mu', 'sigma', 'xi_left', 'xi_right'}
     assert implied_fit.dist.junction == ('implied', 'implied')
+    assert implied_fit.junction == 'implied' and implied_fit.per_side is False
     assert free_fit.llf > implied_fit.llf + 100
 
 
 def test_free_fit_on_implied_junction_data_finds_the_implied_junction():
     truth = ph.Phat(0.0, 1.0, 0.25, 0.25)
     x = truth.rvs(40_000, random_state=np.random.default_rng(3))
-    res = ph.Phat.fit(x, junction='free')
+    res = ph.Phat.fit(x, junction='free', per_side=True)
     implied = ph.Phat.fit(x)
     assert res.llf >= implied.llf - 1e-6
     assert res.llf - implied.llf < 8          # two extra parameters, nothing to gain
@@ -326,9 +328,10 @@ def test_free_fit_on_implied_junction_data_finds_the_implied_junction():
     assert abs(res.params_dict['s_right'] - truth.s_right) < 0.12
 
 
-def test_symmetric_junction_fit(sample):
-    res = ph.Phat.fit(sample, junction='symmetric')
+def test_free_junction_fit_uses_one_distance_unless_per_side(sample):
+    res = ph.Phat.fit(sample, junction='free')
     assert res.names == ('mu', 'sigma', 'xi_left', 'xi_right', 's')
+    assert res.junction == 'free' and res.per_side is False
     dist = res.dist
     assert dist.s_left == dist.s_right == pytest.approx(res.params_dict['s'])
     assert res.all_params['s_left'] == res.all_params['s_right']
@@ -336,7 +339,8 @@ def test_symmetric_junction_fit(sample):
 
 
 def test_two_stage_fit_with_a_free_junction(sample):
-    res = ph.Phat.fit(sample, xi_left=TRUE['xi_left'], xi_right=TRUE['xi_right'], junction='free')
+    res = ph.Phat.fit(sample, xi_left=TRUE['xi_left'], xi_right=TRUE['xi_right'], junction='free',
+                      per_side=True)
     assert res.names == ('mu', 'sigma', 's_left', 's_right')
     assert res.fixed['xi_left'] == TRUE['xi_left']
     for name in res.names:
@@ -357,6 +361,12 @@ def test_fit_options_are_validated(sample):
     with pytest.raises(ValueError):
         ph.Phat.fit(sample, junction='moving')
     with pytest.raises(ValueError):
+        ph.Phat.fit(sample, junction='symmetric')        # not a junction: use per_side
+    with pytest.raises(ValueError):
+        ph.Phat.fit(sample, per_side=True)               # needs junction='free'
+    with pytest.raises(ValueError):
+        ph.Phat.fit(sample, per_side=True, s_left=1.0, s_right=1.0)
+    with pytest.raises(ValueError):
         ph.Phat.fit(sample, junction='free', s_left=1.0, s_right=1.0)
     with pytest.raises(ValueError):
         ph.Phat.fit(sample, s_left=1.0)
@@ -365,5 +375,7 @@ def test_fit_options_are_validated(sample):
 
 
 def test_fit_phat_function_takes_the_same_options(sample):
-    res = fit_phat(sample[:5000], junction='symmetric')
-    assert res.names[-1] == 's'
+    res = fit_phat(sample[:5000], junction='free')
+    assert res.names[-1] == 's' and res.per_side is False
+    res = fit_phat(sample[:5000], junction='free', per_side=True)
+    assert res.names[-2:] == ('s_left', 's_right') and res.per_side is True

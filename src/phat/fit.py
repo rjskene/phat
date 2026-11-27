@@ -28,7 +28,7 @@ __all__ = ['PhatFitResult', 'fit_phat', 'PhatFit']  # noqa: F822  # PhatFit via 
 
 PARAM_NAMES = ('mu', 'sigma', 'xi_left', 'xi_right')
 JUNCTION_NAMES = ('s_left', 's_right')
-JUNCTIONS = ('implied', 'free', 'symmetric')
+JUNCTIONS = ('implied', 'free')
 _XI_MAX = 10.0
 _S_MIN, _S_MAX = 0.05, 5.0
 _S_STARTS = (0.6, 1.0, 1.6)
@@ -44,8 +44,8 @@ class PhatFitResult:
     ----------
     params:     estimates of the free parameters, in :attr:`names` order
     names:      names of the free parameters: ``mu``, ``sigma``; unless fixed, ``xi_left``,
-                ``xi_right``; and for an estimated junction ``s_left``, ``s_right``
-                (``junction='free'``) or ``s`` (``junction='symmetric'``)
+                ``xi_right``; and for an estimated junction ``s`` (one distance for
+                both sides) or ``s_left``, ``s_right`` (``per_side=True``)
     bse:        standard errors (square roots of the diagonal of :attr:`cov`); ``nan``
                 for an estimate that sits on a bound (see :attr:`at_bound`) and where
                 the observed information is not invertible
@@ -55,8 +55,10 @@ class PhatFitResult:
     nobs:       number of observations
     fixed:      parameters held fixed during the fit (``xi_left``, ``xi_right``, ``weights``,
                 ``s_left``, ``s_right``)
-    junction:   ``'implied'`` (junctions follow from the tail shapes, or were given),
-                ``'free'`` or ``'symmetric'`` (junction distances estimated)
+    junction:   ``'implied'`` (junctions follow from the tail shapes, or were given)
+                or ``'free'`` (junction estimated)
+    per_side:   for ``junction='free'``: ``False`` when one distance was estimated
+                for both sides, ``True`` when each side has its own
     converged:  whether the optimiser reported success
     message:    the optimiser's message
     at_bound:   names of the estimates that sit on a bound of the search, typically a
@@ -75,6 +77,7 @@ class PhatFitResult:
     message: str = ''
     at_bound: tuple[str, ...] = ()
     junction: str = 'implied'
+    per_side: bool = False
 
     @property
     def params_dict(self) -> dict[str, float]:
@@ -179,6 +182,7 @@ def fit_phat(
     start: Sequence[float] | None = None,
     *,
     junction: str = 'implied',
+    per_side: bool = False,
     s_left: float | None = None,
     s_right: float | None = None,
     **minimize_kwargs: Any,
@@ -200,10 +204,11 @@ def fit_phat(
     junction:   how the junctions between the Gaussian body and the two tails are set.
 
                 * ``'implied'`` (default): by the tail shapes, as in 1.0.
-                * ``'free'``: one junction distance per side, ``s_left`` and
-                  ``s_right`` (in units of ``sigma`` from ``mu``), estimated with the
-                  other parameters.
-                * ``'symmetric'``: one distance ``s`` for both sides, estimated.
+                * ``'free'``: the junction distance (in units of ``sigma`` from
+                  ``mu``) is estimated with the other parameters; see ``per_side``.
+    per_side:   with ``junction='free'``, ``False`` (default) estimates one distance
+                ``s`` for both sides and ``True`` one per side, ``s_left`` and
+                ``s_right``.
     s_left, s_right: junction distances to hold fixed (give both, with
                 ``junction='implied'``).
     **minimize_kwargs:  forwarded to ``scipy.optimize.minimize`` (default method
@@ -214,15 +219,15 @@ def fit_phat(
     -----
     The implied junction is the special case ``lam = 1`` of the free one, so the
     two fits are nested and twice the difference of their log-likelihoods can be
-    referred to a chi-squared distribution (two degrees of freedom for
-    ``'free'``; ``'symmetric'`` nests the implied junction only when the two
-    tail shapes are equal). As a junction moves far out its tail holds few
+    referred to a chi-squared distribution (two degrees of freedom with
+    ``per_side=True``; a single distance nests the implied junction only when
+    the two tail shapes are equal). As a junction moves far out its tail holds few
     observations and the tail shape on that side becomes poorly determined; an
     estimate that ends on the upper bound of ``s`` says the data do not ask for
     a Pareto tail on that side.
 
     .. versionadded:: 1.1
-       ``junction``, ``s_left`` and ``s_right``.
+       ``junction``, ``per_side``, ``s_left`` and ``s_right``.
     """
     x = np.asarray(values, dtype=float).ravel()
     if x.size < 3:
@@ -231,6 +236,8 @@ def fit_phat(
         raise ValueError('fix both tail shapes or neither')
     if junction not in JUNCTIONS:
         raise ValueError(f'`junction` must be one of {JUNCTIONS}, not {junction!r}')
+    if per_side and junction != 'free':
+        raise ValueError("`per_side` applies to `junction='free'` only")
     if (s_left is None) != (s_right is None):
         raise ValueError('fix both junction distances or neither')
     given_s = s_left is not None
@@ -238,7 +245,7 @@ def fit_phat(
         raise ValueError("`s_left` and `s_right` fix the junctions; do not combine them with `junction`")
     free_tails = xi_left is None
     n_tail = 2 if free_tails else 0
-    n_s = {'implied': 0, 'free': 2, 'symmetric': 1}[junction]
+    n_s = 0 if junction == 'implied' else (2 if per_side else 1)
 
     def unpack(theta: np.ndarray) -> Phat:
         if free_tails:
@@ -318,7 +325,7 @@ def fit_phat(
         params=theta, names=names, bse=bse, cov=cov, llf=-float(res.fun), nobs=int(x.size),
         fixed=fixed, converged=bool(res.success), message=str(res.message),
         at_bound=tuple(name for name, hit in zip(names, on_bound) if hit),
-        junction=junction,
+        junction=junction, per_side=bool(per_side),
     )
 
 

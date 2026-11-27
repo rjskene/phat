@@ -136,9 +136,9 @@ and hold them fixed while the location and scale are fitted.
 The junctions can be estimated as well:
 
 ```python
-res = ph.Phat.fit(x, junction='symmetric')           # one junction distance for both sides
-res = ph.Phat.fit(x, junction='free')                # one per side
-res = ph.Phat.fit(x, xi_left, xi_right, junction='free')   # two-stage, junctions fitted
+res = ph.Phat.fit(x, junction='free')                  # one junction distance for both sides
+res = ph.Phat.fit(x, junction='free', per_side=True)   # one per side
+res = ph.Phat.fit(x, xi_left, xi_right, junction='free', per_side=True)   # two-stage, junctions fitted
 res.dist.s_left, res.dist.s_right                    # junction distances, in units of sigma
 ```
 

@@ -736,7 +736,7 @@ class Phat:
     Gaussian body and less mass, not a different shape, in the tail; as ``s``
     grows the distribution tends to the Gaussian. ``lam = 1`` is the implied
     junction. :meth:`fit` can estimate the junction distances
-    (``junction='free'`` or ``'symmetric'``). The one-tailed hybrid with unequal
+    (``junction='free'``, one for both sides or one per side). The one-tailed hybrid with unequal
     weights is due to Debbabi, Kratz and El Asmi (2015).
 
     With a negative shape the GPD tail of that component ends at
@@ -1067,6 +1067,7 @@ class Phat:
         *,
         backend: str = 'scipy',
         junction: str = 'implied',
+        per_side: bool = False,
         s_left: float | None = None,
         s_right: float | None = None,
         **kwargs: Any,
@@ -1083,10 +1084,11 @@ class Phat:
         Parameters
         ----------
         junction:   ``'implied'`` (default): each junction follows from its tail
-                    shape, as in 1.0. ``'free'``: the junction distances ``s_left``
-                    and ``s_right`` are estimated too. ``'symmetric'``: one
-                    distance ``s`` for both sides is estimated. See
-                    :func:`phat.fit.fit_phat`.
+                    shape, as in 1.0. ``'free'``: the junction distance is
+                    estimated too. See :func:`phat.fit.fit_phat`.
+        per_side:   with ``junction='free'``: ``False`` (default) estimates one
+                    distance ``s`` for both sides, ``True`` one per side
+                    (``s_left`` and ``s_right``).
         s_left, s_right: junction distances to hold fixed (both, in units of
                     ``sigma`` from ``mu``)
         backend:    ``'scipy'`` (default; NumPy + SciPy only) returns a
@@ -1098,11 +1100,12 @@ class Phat:
         if backend == 'scipy':
             from phat.fit import fit_phat
             return fit_phat(values, xi_left, xi_right, weights=weights,
-                            junction=junction, s_left=s_left, s_right=s_right, **kwargs)
+                            junction=junction, per_side=per_side,
+                            s_left=s_left, s_right=s_right, **kwargs)
         if backend == 'statsmodels':
             if weights is not None:
                 raise ValueError('the statsmodels backend does not take `weights`')
-            if junction != 'implied' or s_left is not None or s_right is not None:
+            if junction != 'implied' or per_side or s_left is not None or s_right is not None:
                 raise ValueError('the statsmodels backend fits the implied junction only')
             from phat.fit import _statsmodels_phatfit
             x = np.asarray(values, dtype=float)

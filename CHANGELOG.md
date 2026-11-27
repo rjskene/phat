@@ -31,12 +31,12 @@ gives the 1.0.0 result, and the full 1.0.0 test suite passes unchanged.
     shortfall hold for a free junction and are tested against an independent
     implementation and quadrature.
 - **Junction estimation in `Phat.fit` / `fit_phat`.** `junction='free'`
-  estimates `s_left` and `s_right` with the other parameters;
-  `junction='symmetric'` estimates one distance `s` for both sides;
+  estimates the junction with the other parameters: one distance `s` for both
+  sides by default, or `s_left` and `s_right` with `per_side=True`;
   `s_left=..., s_right=...` holds given distances fixed. All combine with fixed
   tail shapes (the two-stage estimator). The search is bounded to
   `0.05 <= s <= 5` and, when no `start` is given, run from three starting
-  distances. `PhatFitResult` gains `junction`; `all_params` and `dist` carry
+  distances. `PhatFitResult` gains `junction` and `per_side`; `all_params` and `dist` carry
   the junction distances when they were estimated or given.
 
 ### Changed
