@@ -28,13 +28,13 @@ The **phat-tails** package provides the distribution, methods to fit it to a uni
 $ pip install phat-tails
 ```
 
-Version 1.0.0 is not on PyPI yet, so the command above still installs 0.0.11. Until it is, install 1.0.0 from the release tag:
+Version 1.1.0 is not on PyPI yet, so the command above still installs 0.0.11. Until it is, install 1.1.0 from the release tag:
 
 ```console
-$ pip install "phat-tails @ git+https://github.com/rjskene/phat@v1.0.0"
+$ pip install "phat-tails @ git+https://github.com/rjskene/phat@v1.1.0"
 ```
 
-Extras work the same way, for example `"phat-tails[all] @ git+https://github.com/rjskene/phat@v1.0.0"`.
+Extras work the same way, for example `"phat-tails[all] @ git+https://github.com/rjskene/phat@v1.1.0"`.
 
 The distribution needs Python 3.11 or later, NumPy and SciPy, and nothing else. Optional extras add the rest:
 
@@ -148,7 +148,7 @@ The package also provides `ph.Garchcaster`, which simulates forecasts from ARMA 
 
 ## Citing ##
 
-Each release is archived on Zenodo. Cite the version you used; version 1.0.0 is [10.5281/zenodo.24569279](https://doi.org/10.5281/zenodo.24569279). The DOI [10.5281/zenodo.24569278](https://doi.org/10.5281/zenodo.24569278) covers all versions and resolves to the latest.
+Each release is archived on Zenodo under its own DOI. Cite the version you used: the DOI [10.5281/zenodo.24569278](https://doi.org/10.5281/zenodo.24569278) covers all versions, resolves to the latest, and its page lists the DOI of every release (version 1.0.0 is [10.5281/zenodo.24569279](https://doi.org/10.5281/zenodo.24569279)).
 
 Citation metadata is in [CITATION.cff](CITATION.cff); GitHub shows it under "Cite this repository".
 
