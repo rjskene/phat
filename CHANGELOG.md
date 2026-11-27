@@ -5,9 +5,9 @@ All notable changes to `phat-tails` are recorded here. The format follows
 behaviour is listed, because numbers printed in the old README and notebooks
 change.
 
-## [Unreleased]
+## [1.1.0] - 2026-11-27
 
-To be released as 1.1.0. Nothing changes for existing code: every default
+Nothing changes for existing code: every default
 gives the 1.0.0 result, and the full 1.0.0 test suite passes unchanged.
 
 ### Added
